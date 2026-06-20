@@ -1,0 +1,47 @@
+package com.trackai.backend.entity;
+
+import com.trackai.backend.enums.PaymentGateway;
+import com.trackai.backend.enums.PaymentStatus;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "payment_transactions")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class PaymentTransaction {
+
+    @Id
+    private String id;
+
+    @Column(nullable = false)
+    private String userId;
+
+    @Column(nullable = false)
+    private String subscriptionPlanId;
+
+    @Column(nullable = false, unique = true)
+    private String orderId;
+
+    private String paymentId;
+
+    @Column(nullable = false)
+    private Long amount;
+
+    @Column(nullable = false)
+    private String currency;
+
+    @Enumerated(EnumType.STRING)
+    private PaymentStatus status;
+
+    @Enumerated(EnumType.STRING)
+    private PaymentGateway gateway;
+
+    private LocalDateTime createdAt;
+}

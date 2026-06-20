@@ -1,0 +1,33 @@
+# Maven
+target/
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# Spring Boot config (secrets - DB creds, JWT secret, Gemini API key)
+application.yml
+application.properties
+application-*.yml
+application-*.properties
+*.var
+
+# AWS Elastic Beanstalk
+.elasticbeanstalk/*
+!.elasticbeanstalk/*.cfg.yml
+!.elasticbeanstalk/*.global.yml
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
