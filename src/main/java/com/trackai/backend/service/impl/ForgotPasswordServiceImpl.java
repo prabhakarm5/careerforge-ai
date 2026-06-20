@@ -3,6 +3,12 @@ package com.trackai.backend.service.impl;
 import com.trackai.backend.config.RateLimitProperties;
 import com.trackai.backend.dto.RateLimitResponse;
 import com.trackai.backend.entity.User;
+import com.trackai.backend.exception.AccountBlockedException;
+import com.trackai.backend.exception.AccountDisabledException;
+import com.trackai.backend.exception.InvalidCredentialsException;
+import com.trackai.backend.exception.OtpException;
+import com.trackai.backend.exception.RateLimitExceededException;
+import com.trackai.backend.exception.ResourceNotFoundException;
 import com.trackai.backend.repository.UserRepository;
 import com.trackai.backend.service.ForgotPasswordService;
 import com.trackai.backend.service.MailService;
@@ -12,16 +18,22 @@ import com.trackai.backend.service.RedisRefreshTokenService;
 
 import lombok.RequiredArgsConstructor;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.util.Random;
+import java.security.SecureRandom;
 
 @Service
 @RequiredArgsConstructor
 public class ForgotPasswordServiceImpl
                 implements ForgotPasswordService {
+
+        private static final Logger log = LoggerFactory.getLogger(ForgotPasswordServiceImpl.class);
+
+        private static final SecureRandom secureRandom = new SecureRandom();
 
         private final UserRepository userRepository;
         private final PasswordEncoder passwordEncoder;
@@ -47,7 +59,7 @@ public class ForgotPasswordServiceImpl
         private String generateOtp() {
 
                 return String.valueOf(
-                                100000 + new Random().nextInt(900000));
+                                100000 + secureRandom.nextInt(900000));
         }
 
         // Send forgot password OTP
@@ -74,7 +86,7 @@ public class ForgotPasswordServiceImpl
                 // Block request
                 if (!rateLimitResponse.isAllowed()) {
 
-                        throw new RuntimeException(
+                        throw new RateLimitExceededException(
                                         rateLimitResponse.getMessage());
                 }
 
@@ -84,34 +96,34 @@ public class ForgotPasswordServiceImpl
                 // Find user
                 User user = userRepository
                                 .findByEmail(email)
-                                .orElseThrow(() -> new RuntimeException(
+                                .orElseThrow(() -> new ResourceNotFoundException(
                                                 "User not found"));
 
                 // Admin check
                 if (user.getRole().name().equals("ROLE_ADMIN")) {
 
-                        throw new RuntimeException(
+                        throw new InvalidCredentialsException(
                                         "Admin password reset is not allowed");
                 }
 
                 // Blocked user
                 if (Boolean.TRUE.equals(user.getBlocked())) {
 
-                        throw new RuntimeException(
+                        throw new AccountBlockedException(
                                         "Your account is blocked");
                 }
 
                 // Disabled user
                 if (!Boolean.TRUE.equals(user.getEnabled())) {
 
-                        throw new RuntimeException(
+                        throw new AccountDisabledException(
                                         "Your account is disabled");
                 }
 
                 // Email verification
                 if (!Boolean.TRUE.equals(user.getEmailVerified())) {
 
-                        throw new RuntimeException(
+                        throw new AccountDisabledException(
                                         "Please verify your email first");
                 }
 
@@ -119,7 +131,7 @@ public class ForgotPasswordServiceImpl
                 if (redisForgotPasswordOtpService
                                 .hasResendCooldown(email)) {
 
-                        throw new RuntimeException(
+                        throw new RateLimitExceededException(
                                         "Please wait "
                                                         + forgotPasswordResendWaitMinutes
                                                         + " minutes before requesting another OTP");
@@ -144,9 +156,7 @@ public class ForgotPasswordServiceImpl
                                 otp,
                                 forgotPasswordOtpExpiryMinutes);
 
-                System.out.println(
-                                "FORGOT PASSWORD OTP SENT : "
-                                                + email);
+                log.info("Forgot password OTP sent for email: {}", email);
         }
 
         // Verify forgot password OTP
@@ -175,7 +185,7 @@ public class ForgotPasswordServiceImpl
                 // Block request
                 if (!rateLimitResponse.isAllowed()) {
 
-                        throw new RuntimeException(
+                        throw new RateLimitExceededException(
                                         rateLimitResponse.getMessage());
                 }
 
@@ -185,7 +195,7 @@ public class ForgotPasswordServiceImpl
                 // Find user
                 User user = userRepository
                                 .findByEmail(email)
-                                .orElseThrow(() -> new RuntimeException(
+                                .orElseThrow(() -> new ResourceNotFoundException(
                                                 "User not found"));
 
                 // Get stored OTP
@@ -195,14 +205,14 @@ public class ForgotPasswordServiceImpl
                 // OTP expired
                 if (storedOtp == null) {
 
-                        throw new RuntimeException(
+                        throw new OtpException(
                                         "OTP expired or not found");
                 }
 
                 // Invalid OTP
                 if (!storedOtp.equals(otp)) {
 
-                        throw new RuntimeException(
+                        throw new OtpException(
                                         "Invalid OTP");
                 }
 
@@ -210,9 +220,7 @@ public class ForgotPasswordServiceImpl
                 redisForgotPasswordOtpService
                                 .saveVerifiedState(email);
 
-                System.out.println(
-                                "FORGOT PASSWORD OTP VERIFIED : "
-                                                + email);
+                log.info("Forgot password OTP verified for email: {}", email);
         }
 
         // Reset password
@@ -241,7 +249,7 @@ public class ForgotPasswordServiceImpl
                 // Block request
                 if (!rateLimitResponse.isAllowed()) {
 
-                        throw new RuntimeException(
+                        throw new RateLimitExceededException(
                                         rateLimitResponse.getMessage());
                 }
 
@@ -251,14 +259,14 @@ public class ForgotPasswordServiceImpl
                 // Find user
                 User user = userRepository
                                 .findByEmail(email)
-                                .orElseThrow(() -> new RuntimeException(
+                                .orElseThrow(() -> new ResourceNotFoundException(
                                                 "User not found"));
 
                 // OTP verification required
                 if (!redisForgotPasswordOtpService
                                 .isOtpVerified(email)) {
 
-                        throw new RuntimeException(
+                        throw new OtpException(
                                         "OTP verification required");
                 }
 
@@ -267,7 +275,7 @@ public class ForgotPasswordServiceImpl
                                 newPassword,
                                 user.getPassword())) {
 
-                        throw new RuntimeException(
+                        throw new InvalidCredentialsException(
                                         "New password cannot be same as old password");
                 }
 
@@ -290,13 +298,9 @@ public class ForgotPasswordServiceImpl
                 redisRefreshTokenService
                                 .deleteAllRefreshTokens(email);
 
-                System.out.println(
-                                "PASSWORD RESET SUCCESSFUL : "
-                                                + email);
+                log.info("Password reset successful for email: {}", email);
 
-                System.out.println(
-                                "ALL DEVICES LOGGED OUT : "
-                                                + email);
+                log.info("All devices logged out for email: {}", email);
         }
 
         // Resend forgot password OTP
@@ -323,7 +327,7 @@ public class ForgotPasswordServiceImpl
                 // Block request
                 if (!rateLimitResponse.isAllowed()) {
 
-                        throw new RuntimeException(
+                        throw new RateLimitExceededException(
                                         rateLimitResponse.getMessage());
                 }
 
@@ -334,7 +338,7 @@ public class ForgotPasswordServiceImpl
                 if (redisForgotPasswordOtpService
                                 .hasResendCooldown(email)) {
 
-                        throw new RuntimeException(
+                        throw new RateLimitExceededException(
                                         "Resend available after "
                                                         + forgotPasswordResendWaitMinutes
                                                         + " minutes");
@@ -343,8 +347,6 @@ public class ForgotPasswordServiceImpl
                 // Send OTP
                 sendForgotPasswordOtp(email);
 
-                System.out.println(
-                                "FORGOT PASSWORD OTP RESENT : "
-                                                + email);
+                log.info("Forgot password OTP resent for email: {}", email);
         }
 }

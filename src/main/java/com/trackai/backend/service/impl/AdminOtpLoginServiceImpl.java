@@ -5,6 +5,12 @@ import com.trackai.backend.dto.LoginResponse;
 import com.trackai.backend.dto.RateLimitResponse;
 import com.trackai.backend.entity.User;
 import com.trackai.backend.enums.Role;
+import com.trackai.backend.exception.AccountBlockedException;
+import com.trackai.backend.exception.AccountDisabledException;
+import com.trackai.backend.exception.InvalidCredentialsException;
+import com.trackai.backend.exception.OtpException;
+import com.trackai.backend.exception.RateLimitExceededException;
+import com.trackai.backend.exception.ResourceNotFoundException;
 import com.trackai.backend.repository.UserRepository;
 import com.trackai.backend.security.JwtUtil;
 import com.trackai.backend.service.AdminOtpLoginService;
@@ -15,16 +21,22 @@ import com.trackai.backend.service.RedisRefreshTokenService;
 
 import lombok.RequiredArgsConstructor;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
 import java.time.Duration;
-import java.util.Random;
 
 @Service
 @RequiredArgsConstructor
 public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
+
+        private static final Logger log = LoggerFactory.getLogger(AdminOtpLoginServiceImpl.class);
+
+        private static final SecureRandom secureRandom = new SecureRandom();
 
         private final UserRepository userRepository;
         private final PasswordEncoder passwordEncoder;
@@ -60,7 +72,7 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
         private String generateOtp() {
 
                 return String.valueOf(
-                                100000 + new Random().nextInt(900000));
+                                100000 + secureRandom.nextInt(900000));
         }
 
         // Send admin login OTP
@@ -89,7 +101,7 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 // Block request
                 if (!rateLimitResponse.isAllowed()) {
 
-                        throw new RuntimeException(
+                        throw new RateLimitExceededException(
                                         rateLimitResponse.getMessage());
                 }
 
@@ -98,13 +110,13 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 // Find user
                 User user = userRepository
                                 .findByEmail(email)
-                                .orElseThrow(() -> new RuntimeException(
+                                .orElseThrow(() -> new InvalidCredentialsException(
                                                 "Invalid email or password"));
 
                 // Admin validation
                 if (user.getRole() != Role.ROLE_ADMIN) {
 
-                        throw new RuntimeException(
+                        throw new InvalidCredentialsException(
                                         "Access denied. Admin account required");
                 }
 
@@ -113,33 +125,33 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                                 password,
                                 user.getPassword())) {
 
-                        throw new RuntimeException(
+                        throw new InvalidCredentialsException(
                                         "Invalid email or password");
                 }
 
                 // Account checks
                 if (Boolean.TRUE.equals(user.getBlocked())) {
 
-                        throw new RuntimeException(
+                        throw new AccountBlockedException(
                                         "Admin account is blocked");
                 }
 
                 if (!Boolean.TRUE.equals(user.getEnabled())) {
 
-                        throw new RuntimeException(
+                        throw new AccountDisabledException(
                                         "Admin account is disabled");
                 }
 
                 if (!Boolean.TRUE.equals(user.getEmailVerified())) {
 
-                        throw new RuntimeException(
+                        throw new AccountDisabledException(
                                         "Please verify your email first");
                 }
 
                 // Resend cooldown
                 if (redisAdminOtpService.hasResendCooldown(email)) {
 
-                        throw new RuntimeException(
+                        throw new RateLimitExceededException(
                                         "Please wait "
                                                         + resendWaitMinutes
                                                         + " minutes before requesting another OTP");
@@ -162,6 +174,8 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                                 user.getEmail(),
                                 otp,
                                 otpExpiryMinutes);
+
+                log.info("Admin login OTP sent for email: {}", email);
         }
 
         // Verify admin login OTP
@@ -191,7 +205,7 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 // Block request
                 if (!rateLimitResponse.isAllowed()) {
 
-                        throw new RuntimeException(
+                        throw new RateLimitExceededException(
                                         rateLimitResponse.getMessage());
                 }
 
@@ -201,7 +215,7 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 // Find user
                 User user = userRepository
                                 .findByEmail(email)
-                                .orElseThrow(() -> new RuntimeException(
+                                .orElseThrow(() -> new ResourceNotFoundException(
                                                 "User not found"));
 
                 // Get stored OTP
@@ -210,14 +224,14 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 // OTP expired
                 if (storedOtp == null) {
 
-                        throw new RuntimeException(
+                        throw new OtpException(
                                         "OTP expired or not found");
                 }
 
                 // Invalid OTP
                 if (!storedOtp.equals(otp)) {
 
-                        throw new RuntimeException(
+                        throw new OtpException(
                                         "Invalid OTP");
                 }
 
@@ -243,6 +257,8 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
 
                 // Delete OTP
                 redisAdminOtpService.deleteOtp(email);
+
+                log.info("Admin login OTP verified for email: {}", email);
 
                 // Response
                 return LoginResponse.builder()
@@ -280,7 +296,7 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 // Block request
                 if (!rateLimitResponse.isAllowed()) {
 
-                        throw new RuntimeException(
+                        throw new RateLimitExceededException(
                                         rateLimitResponse.getMessage());
                 }
 
@@ -289,7 +305,7 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 // Resend cooldown
                 if (redisAdminOtpService.hasResendCooldown(email)) {
 
-                        throw new RuntimeException(
+                        throw new RateLimitExceededException(
                                         "Resend available after "
                                                         + resendWaitMinutes
                                                         + " minutes");
@@ -298,7 +314,7 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 // Find user
                 User user = userRepository
                                 .findByEmail(email)
-                                .orElseThrow(() -> new RuntimeException(
+                                .orElseThrow(() -> new ResourceNotFoundException(
                                                 "User not found"));
 
                 // Generate OTP
@@ -318,5 +334,7 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                                 user.getEmail(),
                                 otp,
                                 otpExpiryMinutes);
+
+                log.info("Admin login OTP resent for email: {}", email);
         }
 }

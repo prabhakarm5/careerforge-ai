@@ -4,6 +4,9 @@ import com.trackai.backend.entity.User;
 import com.trackai.backend.enums.Role;
 import com.trackai.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -16,13 +19,15 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class BackendApplication {
 
+	private static Logger logger = LoggerFactory.getLogger(BackendApplication.class);
+
 	public static void main(String[] args) {
 
 		SpringApplication.run(
 				BackendApplication.class,
 				args);
 
-		System.out.println("Server Started");
+		logger.info("Server Started");
 	}
 
 	@Bean
@@ -66,12 +71,11 @@ public class BackendApplication {
 
 				userRepository.save(admin);
 
-				System.out.println(
-						"Admin user created successfully");
+				logger.info("Admin user created successfully");
 
 			} else {
 
-				System.out.println(
+				logger.info(
 						"Admin already exists");
 			}
 		};
