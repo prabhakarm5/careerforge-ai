@@ -1,0 +1,328 @@
+# =========================================
+# SERVER CONFIGURATION
+# =========================================
+server:
+  # App is configured to run on port 9092 (default agar env var na ho)
+  port: ${SERVER_PORT:9092}
+
+spring:
+
+  # ---------------------------------------
+  # DATABASE (MySQL) CONFIGURATION
+  # ---------------------------------------
+  datasource:
+    url: ${DB_URL}                      # MySQL connection string (host + db name)
+    username: ${DB_USERNAME}            # MySQL username
+    password: ${DB_PASSWORD}            # MySQL password (secret - kept in .env)
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # ---------------------------------------
+  # JPA / HIBERNATE CONFIGURATION
+  # ---------------------------------------
+  jpa:
+
+    hibernate:
+      ddl-auto: update                  # Auto-update DB schema based on entities
+
+    show-sql: true                      # Log SQL queries in console (dev only)
+
+    properties:
+
+      hibernate:
+         format_sql: true                # Pretty-print SQL logs
+
+  # ---------------------------------------
+  # EMAIL (SMTP via Gmail) CONFIGURATION
+  # Used for: OTP, verification emails, password reset
+  # ---------------------------------------
+  mail:
+
+    host: smtp.gmail.com
+
+    port: 587
+
+    username: ${MAIL_USERNAME}          # Gmail address sending the mails
+    password: ${MAIL_PASSWORD}          # Gmail App Password (NOT your normal Gmail password)
+
+    properties:
+
+      mail:
+
+        smtp:
+
+          auth: true
+
+          starttls:
+
+            enable: true                # Required for Gmail SMTP
+
+  # ---------------------------------------
+  # REDIS CONFIGURATION
+  # Used for: rate limiting, caching, token blacklisting
+  # ---------------------------------------
+  data:
+
+    redis:
+
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+# =========================================
+# CUSTOM APPLICATION SETTINGS (app.*)
+# =========================================
+app:
+
+  # ---------------------------------------
+  # WALLET / TOKEN SYSTEM
+  # Tokens given to new users on signup (for AI features usage)
+  # ---------------------------------------
+  wallet:
+
+    initial-tokens: 100
+
+  # Base URL used in email links (verification, reset password, etc.)
+  frontend-url: ${FRONTEND_URL:http://localhost:9092}
+
+  # ---------------------------------------
+  # MAIL CONTENT SETTINGS
+  # ---------------------------------------
+  mail:
+
+    from-name:
+      TrackAI Security Team             # Sender name shown in emails
+
+    verification-expiry-minutes:
+      15                                # Signup verification link validity
+
+    resend-wait-minutes:
+      1                                 # Cooldown before resending verification mail
+
+  # ---------------------------------------
+  # JWT TOKEN EXPIRY SETTINGS (Normal Users)
+  # ---------------------------------------
+  jwt:
+
+    access-token-expiry:
+      15m                               # Short-lived access token
+
+    refresh-token-expiry:
+      7d                                # Long-lived refresh token
+
+  # ---------------------------------------
+  # ADMIN SESSION SETTINGS (separate from user JWT)
+  # ---------------------------------------
+  admin:
+
+    access-token-expiry:
+      10m
+
+    refresh-token-expiry:
+      1d
+
+    absolute-session-expiry:
+      1d                                # Hard cutoff - admin must re-login after this regardless
+
+  # ---------------------------------------
+  # OTP SETTINGS (used during login/signup verification)
+  # ---------------------------------------
+  otp:
+
+    expiry-minutes:
+      5
+
+    resend-wait-minutes:
+      2
+
+  # ---------------------------------------
+  # FORGOT PASSWORD FLOW SETTINGS
+  # ---------------------------------------
+  forgot-password:
+
+    otp-expiry-minutes:
+      5
+
+    resend-wait-minutes:
+      2
+
+  # ---------------------------------------
+  # RATE LIMITING (Token Bucket Algorithm via Redis)
+  # capacity = max requests allowed in burst
+  # refill-tokens = tokens added back per refill window
+  # refill-minutes = how often refill happens
+  # ---------------------------------------
+  rate-limit:
+
+    # USER LOGIN
+    login:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    # REFRESH TOKEN
+    refresh-token:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+
+    # ADMIN LOGIN
+    admin-login:
+      capacity: 3
+      refill-tokens: 3
+      refill-minutes: 1
+
+    # VERIFY ADMIN OTP
+    verify-admin-otp:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    # RESEND ADMIN OTP
+    resend-admin-otp:
+      capacity: 3
+      refill-tokens: 3
+      refill-minutes: 1
+
+    # FORGOT PASSWORD
+    forgot-password:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    # VERIFY FORGOT PASSWORD OTP
+    verify-forgot-password-otp:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    # RESEND FORGOT PASSWORD OTP
+    resend-forgot-password-otp:
+      capacity: 3
+      refill-tokens: 3
+      refill-minutes: 1
+
+    # RESET PASSWORD
+    reset-password:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    # REGISTER (signup)
+    register:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    # LOGOUT
+    logout:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+
+    # CHAT AI feature
+    chat:
+      capacity: 20
+      refill-tokens: 20
+      refill-minutes: 1
+
+    # IMAGE GENERATION feature
+    image:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+
+    # IMAGE VISION (analyze uploaded image) feature
+    vision:
+      capacity: 15
+      refill-tokens: 15
+      refill-minutes: 1
+
+    # PDF AI (ATS score / PDF generation) feature
+    pdf:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+
+    # WEBSITE GENERATOR feature
+    website-generator:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    # CREATE ORDER (Razorpay payment initiation)
+    create-order:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    # VERIFY PAYMENT (Razorpay webhook/callback)
+    verify-payment:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1  
+
+    # PAYMENT HISTORY (view past transactions)
+    payment-history:
+      capacity: 50
+      refill-tokens: 50
+      refill-minutes: 1  
+
+    # ADMIN - SUBSCRIPTION PLAN MANAGEMENT (create plan)
+    create-plan:
+     capacity: 10
+     refill-tokens: 10
+     refill-minutes: 1
+
+    # GET ALL PLANS (for users to view available subscriptions)
+    get-plans:
+     capacity: 100
+     refill-tokens: 100
+     refill-minutes: 1
+
+    # UPDATE PLAN (admin edits existing plan)
+    update-plan:
+     capacity: 10
+     refill-tokens: 10
+     refill-minutes: 1
+
+    # DELETE PLAN (admin removes a plan)
+    delete-plan:
+     capacity: 5
+     refill-tokens: 5
+     refill-minutes: 1
+
+# =========================================
+# CLOUDINARY CONFIGURATION
+# Used for: storing/serving uploaded images, generated images, PDFs etc.
+# =========================================
+cloudinary:
+
+  cloud-name:
+    ${CLOUDINARY_CLOUD_NAME}
+
+  api-key:
+    ${CLOUDINARY_API_KEY}
+
+  api-secret:
+    ${CLOUDINARY_API_SECRET}
+
+# =========================================
+# GROQ AI CONFIGURATION
+# Used for: Chat AI feature (LLM calls)
+# =========================================
+groq:
+
+  api-key: ${GROQ_API_KEY}
+
+  model: llama-3.3-70b-versatile        # Model used for chat completions
+
+  url: https://api.groq.com/openai/v1/chat/completions  
+
+# =========================================
+# RAZORPAY CONFIGURATION
+# Used for: subscription/wallet payments
+# =========================================
+razorpay:
+
+  key-id: ${RAZORPAY_KEY_ID}
+
+  key-secret: ${RAZORPAY_KEY_SECRET}

@@ -129,6 +129,12 @@
     <artifactId>razorpay-java</artifactId>
     <version>1.4.4</version>
 </dependency>
+<!-- DOTENV-->
+<dependency>
+    <groupId>me.paulschwarz</groupId>
+    <artifactId>spring-dotenv</artifactId>
+    <version>4.0.0</version>
+</dependency>
 
         <!-- TEST -->
         <dependency>
