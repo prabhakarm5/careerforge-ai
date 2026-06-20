@@ -1,33 +1,35 @@
-# Maven
+# MAVEN BUILD OUTPUT
 target/
 *.class
 
-# IDE
+# IDE FILES
 .idea/
 *.iml
 .vscode/
 .settings/
 .classpath
 .project
+.factorypath
 
-# Spring Boot config (secrets - DB creds, JWT secret, Gemini API key)
-application.yml
-application.properties
-application-*.yml
-application-*.properties
+# SECRETS - NEVER PUSH THESE
+.env
+.env.*
 *.var
 
-# AWS Elastic Beanstalk
+# AWS ELASTIC BEANSTALK
 .elasticbeanstalk/*
 !.elasticbeanstalk/*.cfg.yml
 !.elasticbeanstalk/*.global.yml
 
-# Logs
+# LOGS
 *.log
+logs/
 
-# OS
+# OS FILES
 .DS_Store
 Thumbs.db
 
-# Env
-.env
+# MISC
+*.swp
+*.bak
+HELP.md
