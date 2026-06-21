@@ -1,11 +1,14 @@
 package com.trackai.backend.service;
 
-import com.trackai.backend.dto.ChatRequest;
-import com.trackai.backend.dto.ChatResponse;
+import java.util.List;
+import com.trackai.backend.dto.chat.ChatResponse;
+import com.trackai.backend.dto.groq.GroqMessage;
 
 public interface GroqService {
 
-    ChatResponse generateResponse(
-            ChatRequest request);
+    ChatResponse generateResponse(List<GroqMessage> messages);
+
+    String generateTitle(
+            String prompt);
 
 }

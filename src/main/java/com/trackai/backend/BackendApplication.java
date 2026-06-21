@@ -27,7 +27,7 @@ public class BackendApplication {
 				BackendApplication.class,
 				args);
 
-		logger.info("Server Started");
+		logger.info("Server Started!!!!!");
 	}
 
 	@Bean

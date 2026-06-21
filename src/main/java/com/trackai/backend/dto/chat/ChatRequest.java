@@ -1,4 +1,4 @@
-package com.trackai.backend.dto;
+package com.trackai.backend.dto.chat;
 
 import jakarta.validation.constraints.NotBlank;
 import lombok.Getter;
@@ -8,6 +8,10 @@ import lombok.Setter;
 @Setter
 public class ChatRequest {
 
-    @NotBlank(message = "Message is required")
+    // null means new chat
+    private String conversationId;
+
+    @NotBlank
     private String message;
+
 }

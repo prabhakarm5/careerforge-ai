@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.web.access.AccessDeniedHandler;
@@ -16,9 +17,11 @@ import java.util.HashMap;
 import java.util.Map;
 
 @Component
+@RequiredArgsConstructor
 public class JwtAccessDeniedHandler
-
                 implements AccessDeniedHandler {
+
+        private final ObjectMapper objectMapper;
 
         @Override
         public void handle(
@@ -29,29 +32,19 @@ public class JwtAccessDeniedHandler
 
                         AccessDeniedException accessDeniedException)
 
-                        throws IOException, ServletException {
+                        throws IOException {
 
-                // CONSOLE LOG
-                System.out.println(
-
-                                "ACCESS DENIED: "
-                                                +
-
-                                                request.getRequestURI());
-
-                // RESPONSE STATUS
                 response.setStatus(
                                 HttpServletResponse.SC_FORBIDDEN);
 
                 response.setContentType(
                                 "application/json");
 
-                // RESPONSE BODY
                 Map<String, Object> body = new HashMap<>();
 
                 body.put(
                                 "timestamp",
-                                LocalDateTime.now());
+                                LocalDateTime.now().toString());
 
                 body.put(
                                 "status",
@@ -69,13 +62,8 @@ public class JwtAccessDeniedHandler
                                 "path",
                                 request.getRequestURI());
 
-                // SEND JSON
-                new ObjectMapper()
-
-                                .writeValue(
-
-                                                response.getOutputStream(),
-
-                                                body);
+                objectMapper.writeValue(
+                                response.getOutputStream(),
+                                body);
         }
 }

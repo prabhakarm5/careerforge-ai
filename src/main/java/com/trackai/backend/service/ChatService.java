@@ -1,10 +1,11 @@
 package com.trackai.backend.service;
 
-import com.trackai.backend.dto.ChatRequest;
-import com.trackai.backend.dto.ChatResponse;
+import com.trackai.backend.dto.chat.ChatResponse;
+import com.trackai.backend.dto.chat.SendMessageRequest;
 
 public interface ChatService {
 
-    ChatResponse chat(
-            ChatRequest request);
+    ChatResponse sendMessage(
+            SendMessageRequest request);
+
 }

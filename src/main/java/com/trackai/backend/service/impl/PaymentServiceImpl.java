@@ -21,6 +21,8 @@ import com.trackai.backend.repository.UserRepository;
 import com.trackai.backend.service.PaymentService;
 import com.trackai.backend.service.RedisRateLimitService;
 import com.trackai.backend.service.WalletService;
+
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Value;
@@ -177,6 +179,7 @@ public class PaymentServiceImpl
         }
 
         // VERIFY PAYMENT
+        @Transactional
         @Override
         public void verifyPayment(
                         VerifyPaymentRequest request) {
@@ -229,31 +232,28 @@ public class PaymentServiceImpl
                                                 "Invalid payment signature");
                         }
 
-                        PaymentTransaction paymentTransaction =
-
-                                        paymentTransactionRepository
-                                                        .findByOrderId(
-                                                                        request.getRazorpayOrderId())
-
-                                                        .orElseThrow(() -> new RuntimeException(
+                        PaymentTransaction paymentTransaction = paymentTransactionRepository
+                                        .findByOrderId(
+                                                        request.getRazorpayOrderId())
+                                        .orElseThrow(
+                                                        () -> new RuntimeException(
                                                                         "Payment not found"));
 
-                        // Prevent duplicate verification
+                        // Already processed
                         if (paymentTransaction.getStatus() == PaymentStatus.SUCCESS) {
 
                                 return;
                         }
 
-                        SubscriptionPlan plan =
-
-                                        subscriptionPlanRepository
-                                                        .findById(
-                                                                        paymentTransaction.getSubscriptionPlanId())
-
-                                                        .orElseThrow(() -> new RuntimeException(
+                        // Update payment transaction
+                        SubscriptionPlan plan = subscriptionPlanRepository
+                                        .findById(
+                                                        paymentTransaction
+                                                                        .getSubscriptionPlanId())
+                                        .orElseThrow(
+                                                        () -> new RuntimeException(
                                                                         "Plan not found"));
 
-                        // Update payment
                         paymentTransaction.setPaymentId(
                                         request.getRazorpayPaymentId());
 
@@ -263,25 +263,21 @@ public class PaymentServiceImpl
                         paymentTransactionRepository.save(
                                         paymentTransaction);
 
-                        // Prevent double credit if already verified
-                        if (paymentTransaction.getStatus() == PaymentStatus.SUCCESS) {
+                        // Add tokens to wallet
 
-                                throw new RuntimeException(
-                                                "Payment already verified");
-                        }
-
-                        // Credit wallet
                         walletService.addTokens(
 
                                         paymentTransaction.getUserId(),
 
                                         plan.getTokens(),
 
-                                        FeatureType.PAYMENT,
+                                        FeatureType.SUBSCRIPTION,
 
-                                        "Payment successful");
+                                        "Subscription purchase");
 
-                } catch (Exception e) {
+                }
+
+                catch (Exception e) {
 
                         throw new RuntimeException(
                                         "Payment verification failed : "

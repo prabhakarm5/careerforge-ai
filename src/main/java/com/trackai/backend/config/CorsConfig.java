@@ -5,8 +5,7 @@ import org.springframework.context.annotation.Configuration;
 
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-
-import org.springframework.web.filter.CorsFilter;
+import org.springframework.web.cors.CorsConfigurationSource;
 
 import java.util.List;
 
@@ -14,14 +13,11 @@ import java.util.List;
 public class CorsConfig {
 
         @Bean
-        public CorsFilter corsFilter() {
+        public CorsConfigurationSource corsConfigurationSource() {
 
-                CorsConfiguration config =
+                CorsConfiguration configuration = new CorsConfiguration();
 
-                                new CorsConfiguration();
-
-                // ALLOW FRONTEND
-                config.setAllowedOrigins(
+                configuration.setAllowedOrigins(
 
                                 List.of(
 
@@ -29,8 +25,7 @@ public class CorsConfig {
 
                                                 "http://localhost:5500"));
 
-                // ALLOW METHODS
-                config.setAllowedMethods(
+                configuration.setAllowedMethods(
 
                                 List.of(
 
@@ -44,24 +39,21 @@ public class CorsConfig {
 
                                                 "OPTIONS"));
 
-                // ALLOW HEADERS
-                config.setAllowedHeaders(
+                configuration.setAllowedHeaders(
+
                                 List.of("*"));
 
-                // ALLOW CREDENTIALS
-                config.setAllowCredentials(true);
+                configuration.setAllowCredentials(true);
 
-                // APPLY CONFIG
-                UrlBasedCorsConfigurationSource source =
-
-                                new UrlBasedCorsConfigurationSource();
+                UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
 
                 source.registerCorsConfiguration(
 
                                 "/**",
 
-                                config);
+                                configuration);
 
-                return new CorsFilter(source);
+                return source;
         }
+
 }

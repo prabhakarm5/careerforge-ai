@@ -1,15 +1,19 @@
-package com.trackai.backend.dto;
+package com.trackai.backend.dto.chat;
 
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.time.LocalDateTime;
+
 @Getter
 @Setter
 @Builder
-public class ChatResponse {
+public class ChatMessageResponse {
 
-    private String response;
+    private String role;
+
+    private String content;
 
     private Integer promptTokens;
 
@@ -17,5 +21,5 @@ public class ChatResponse {
 
     private Integer totalTokens;
 
-    private Long remainingTokens;
+    private LocalDateTime createdAt;
 }

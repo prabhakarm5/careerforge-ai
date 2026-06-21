@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
@@ -16,9 +17,11 @@ import java.util.HashMap;
 import java.util.Map;
 
 @Component
+@RequiredArgsConstructor
 public class JwtAuthenticationEntryPoint
-
                 implements AuthenticationEntryPoint {
+
+        private final ObjectMapper objectMapper;
 
         @Override
         public void commence(
@@ -29,7 +32,7 @@ public class JwtAuthenticationEntryPoint
 
                         AuthenticationException authException)
 
-                        throws IOException, ServletException {
+                        throws IOException {
 
                 response.setStatus(
                                 HttpServletResponse.SC_UNAUTHORIZED);
@@ -41,7 +44,7 @@ public class JwtAuthenticationEntryPoint
 
                 error.put(
                                 "timestamp",
-                                LocalDateTime.now());
+                                LocalDateTime.now().toString());
 
                 error.put(
                                 "status",
@@ -59,10 +62,8 @@ public class JwtAuthenticationEntryPoint
                                 "path",
                                 request.getRequestURI());
 
-                new ObjectMapper()
-
-                                .writeValue(
-                                                response.getOutputStream(),
-                                                error);
+                objectMapper.writeValue(
+                                response.getOutputStream(),
+                                error);
         }
 }

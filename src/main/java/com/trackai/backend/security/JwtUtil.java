@@ -87,6 +87,7 @@ public class JwtUtil {
                                                 SignatureAlgorithm.HS256)
 
                                 .compact();
+
         }
 
         // GENERATE USER REFRESH TOKEN
