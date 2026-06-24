@@ -35,7 +35,7 @@ public class GlobalExceptionHandler {
                                 .build();
         }
 
-        // VALIDATION ERRORS
+        // VALIDATION ERRORS -> 400
         @ExceptionHandler(MethodArgumentNotValidException.class)
         public ResponseEntity<ErrorResponse> handleValidationExceptions(
                         MethodArgumentNotValidException ex,

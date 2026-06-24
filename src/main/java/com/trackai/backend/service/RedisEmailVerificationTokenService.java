@@ -16,4 +16,13 @@ public interface RedisEmailVerificationTokenService {
         // DELETE TOKEN
         void deleteToken(
                         String token);
+
+        // SAVE RESEND COOLDOWN
+        void saveResendCooldown(String email);
+
+        // CHECK RESEND COOLDOWN
+        boolean hasResendCooldown(String email);
+
+        // GET RESEND COOLDOWN SECONDS
+        Long getResendCooldownSeconds(String email);
 }

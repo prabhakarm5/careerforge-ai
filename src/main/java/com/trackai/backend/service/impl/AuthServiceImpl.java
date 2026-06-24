@@ -86,8 +86,7 @@ public class AuthServiceImpl implements AuthService {
                 // Email exists
                 if (userRepository.findByEmail(email).isPresent()) {
 
-                        throw new RuntimeException(
-                                        "Email already registered");
+                        throw new RuntimeException("Email already registered");
                 }
 
                 // Mobile exists
@@ -112,9 +111,8 @@ public class AuthServiceImpl implements AuthService {
                                 .id(UUID.randomUUID().toString())
                                 .name(request.getName().trim())
                                 .email(email)
-                                .password(
-                                                passwordEncoder.encode(
-                                                                request.getPassword()))
+                                .password(passwordEncoder.encode(
+                                                request.getPassword()))
                                 .mobileNumber(mobileNumber)
                                 .description(request.getDescription())
                                 .profileImage(profileImage)

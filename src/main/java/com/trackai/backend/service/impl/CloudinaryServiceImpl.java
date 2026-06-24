@@ -18,6 +18,7 @@ public class CloudinaryServiceImpl
 
         private final Cloudinary cloudinary;
 
+        // UPLOAD IMAGE
         @Override
         public String uploadImage(
                         MultipartFile file) {

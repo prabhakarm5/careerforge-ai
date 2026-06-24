@@ -64,10 +64,7 @@ public class UserAuthController {
 
                         @Valid @RequestBody LoginRequest request) {
 
-                return ResponseEntity.ok(
-
-                                authService
-                                                .loginUser(request));
+                return ResponseEntity.ok(authService.loginUser(request));
         }
 
         // VERIFY EMAIL

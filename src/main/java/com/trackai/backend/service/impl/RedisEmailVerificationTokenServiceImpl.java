@@ -24,6 +24,8 @@ public class RedisEmailVerificationTokenServiceImpl
 
                         "email_verification_lookup:";
 
+        private static final String RESEND_PREFIX = "email_resend_cooldown:";
+
         // NORMALIZE EMAIL
         private String normalizeEmail(
                         String email) {
@@ -115,5 +117,54 @@ public class RedisEmailVerificationTokenServiceImpl
                         redisTemplate.delete(
                                         EMAIL_PREFIX + email);
                 }
+        }
+
+        @Override
+        public void saveResendCooldown(
+                        String email) {
+
+                email = normalizeEmail(email);
+
+                redisTemplate.opsForValue()
+
+                                .set(
+
+                                                RESEND_PREFIX + email,
+
+                                                "true",
+
+                                                Duration.ofMinutes(5)
+
+                                );
+        }
+
+        @Override
+        public boolean hasResendCooldown(
+                        String email) {
+
+                email = normalizeEmail(email);
+
+                return Boolean.TRUE.equals(
+
+                                redisTemplate.hasKey(
+
+                                                RESEND_PREFIX + email
+
+                                )
+
+                );
+        }
+
+        @Override
+        public Long getResendCooldownSeconds(
+                        String email) {
+
+                email = normalizeEmail(email);
+
+                return redisTemplate.getExpire(
+
+                                RESEND_PREFIX + email
+
+                );
         }
 }

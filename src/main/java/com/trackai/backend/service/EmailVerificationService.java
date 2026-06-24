@@ -13,4 +13,5 @@ public interface EmailVerificationService {
         // RESEND VERIFICATION EMAIL
         void resendVerificationEmail(
                         String email);
+
 }

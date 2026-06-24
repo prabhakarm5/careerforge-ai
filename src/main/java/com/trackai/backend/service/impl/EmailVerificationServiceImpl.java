@@ -1,13 +1,19 @@
 package com.trackai.backend.service.impl;
 
+import com.trackai.backend.config.RateLimitProperties;
+import com.trackai.backend.dto.RateLimitResponse;
 import com.trackai.backend.entity.User;
+import com.trackai.backend.exception.ResendCooldownException;
 import com.trackai.backend.repository.UserRepository;
 import com.trackai.backend.service.EmailVerificationService;
 import com.trackai.backend.service.MailService;
 import com.trackai.backend.service.RedisEmailVerificationTokenService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+
+import java.time.Duration;
 import java.util.UUID;
 
 @Service
@@ -31,8 +37,13 @@ public class EmailVerificationServiceImpl
 
         private final RedisEmailVerificationTokenService redisVerificationTokenService;
 
+        private final RedisRateLimitServiceImpl redisRateLimitService;
+
+        private final RateLimitProperties rateLimitProperties;
+
         // SEND VERIFICATION EMAIL
         @Override
+        @Async
         public void sendVerificationEmail(
                         String email) {
 
@@ -69,13 +80,9 @@ public class EmailVerificationServiceImpl
                                                 token);
 
                 // CREATE VERIFY LINK
-                String verificationLink =
-
-                                frontendUrl
-                                                +
-                                                "/api/auth/verify?token="
-                                                +
-                                                token;
+                String verificationLink = frontendUrl +
+                                "/verify-email?token=" +
+                                token;
 
                 // SEND EMAIL
                 mailService.sendVerificationEmail(
@@ -91,36 +98,51 @@ public class EmailVerificationServiceImpl
 
         // VERIFY TOKEN
         @Override
-        public void verifyToken(
-                        String token) {
+        public void verifyToken(String token) {
 
-                // GET EMAIL FROM REDIS
-                String email =
+                // Rate limit
+                RateLimitResponse rateLimitResponse = redisRateLimitService.allowRequest(
 
-                                redisVerificationTokenService
+                                "VerifyToken:" + token,
 
-                                                .getEmailByToken(
-                                                                token);
+                                rateLimitProperties
+                                                .getVerifyToken()
+                                                .getCapacity(),
 
-                // INVALID TOKEN
+                                rateLimitProperties
+                                                .getVerifyToken()
+                                                .getRefillTokens(),
+
+                                rateLimitProperties
+                                                .getVerifyToken()
+                                                .getRefillMinutes());
+
+                // Block request
+                if (!rateLimitResponse.isAllowed()) {
+
+                        throw new RuntimeException(
+                                        rateLimitResponse.getMessage());
+                }
+
+                System.out.println("TOKEN RECEIVED = " + token);
+
+                String email = redisVerificationTokenService
+                                .getEmailByToken(token);
+
+                System.out.println("EMAIL FROM REDIS = " + email);
+
                 if (email == null) {
 
                         throw new RuntimeException(
-
                                         "Invalid or expired verification token");
                 }
 
-                // FIND USER
                 User user = userRepository
-
                                 .findByEmail(email)
-
-                                .orElseThrow(() ->
-
-                                new RuntimeException(
+                                .orElseThrow(() -> new RuntimeException(
                                                 "User not found"));
 
-                // ALREADY VERIFIED
+                // Already verified
                 if (Boolean.TRUE.equals(
                                 user.getEmailVerified())) {
 
@@ -128,9 +150,8 @@ public class EmailVerificationServiceImpl
                                         "Email already verified");
                 }
 
-                // VERIFY USER
+                // Verify user
                 user.setEnabled(true);
-
                 user.setEmailVerified(true);
 
                 // SAVE USER
@@ -138,8 +159,11 @@ public class EmailVerificationServiceImpl
 
                 // DELETE TOKEN
                 redisVerificationTokenService
-
                                 .deleteToken(token);
+
+                System.out.println(
+                                "EMAIL VERIFIED SUCCESSFULLY = "
+                                                + email);
         }
 
         // RESEND VERIFICATION EMAIL
@@ -147,24 +171,38 @@ public class EmailVerificationServiceImpl
         public void resendVerificationEmail(
                         String email) {
 
-                // NORMALIZE EMAIL
+                // Rate limit
+                RateLimitResponse rateLimitResponse = redisRateLimitService.allowRequest(
+
+                                "ResendVerificationEmail:" + email,
+
+                                rateLimitProperties
+                                                .getResendVerificationEmail()
+                                                .getCapacity(),
+
+                                rateLimitProperties
+                                                .getResendVerificationEmail()
+                                                .getRefillTokens(),
+
+                                rateLimitProperties
+                                                .getResendVerificationEmail()
+                                                .getRefillMinutes());
+
+                // Block request
+                if (!rateLimitResponse.isAllowed()) {
+
+                        throw new RuntimeException(
+                                        rateLimitResponse.getMessage());
+                }
                 email = email
-
                                 .trim()
-
                                 .toLowerCase();
 
-                // FIND USER
                 User user = userRepository
-
                                 .findByEmail(email)
-
-                                .orElseThrow(() ->
-
-                                new RuntimeException(
+                                .orElseThrow(() -> new RuntimeException(
                                                 "User not found"));
 
-                // ALREADY VERIFIED
                 if (Boolean.TRUE.equals(
                                 user.getEmailVerified())) {
 
@@ -172,7 +210,29 @@ public class EmailVerificationServiceImpl
                                         "Email already verified");
                 }
 
-                // SEND NEW VERIFICATION EMAIL
+                if (redisVerificationTokenService
+                                .hasResendCooldown(email)) {
+
+                        Long remainingSeconds =
+
+                                        redisVerificationTokenService
+                                                        .getResendCooldownSeconds(
+                                                                        email);
+
+                        throw new RuntimeException(
+
+                                        "Please wait "
+
+                                                        + remainingSeconds
+
+                                                        + " seconds before requesting another verification email"
+
+                        );
+                }
+
+                redisVerificationTokenService
+                                .saveResendCooldown(email);
+
                 sendVerificationEmail(email);
         }
 }

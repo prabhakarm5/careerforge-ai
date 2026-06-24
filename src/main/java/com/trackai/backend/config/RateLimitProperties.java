@@ -84,6 +84,12 @@ public class RateLimitProperties {
     // Delete Subscription Plan API
     private Limit deletePlan = new Limit();
 
+    // email verification resend
+    private Limit resendVerificationEmail = new Limit();
+
+    // email verification verify
+    private Limit verifyToken = new Limit();
+
     @Getter
     @Setter
     public static class Limit {

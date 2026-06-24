@@ -81,7 +81,7 @@ app:
     initial-tokens: 100
 
   # Base URL used in email links (verification, reset password, etc.)
-  frontend-url: ${FRONTEND_URL:http://localhost:9092}
+  frontend-url: ${FRONTEND_URL}
 
   # ---------------------------------------
   # MAIL CONTENT SETTINGS
@@ -289,6 +289,18 @@ app:
      capacity: 5
      refill-tokens: 5
      refill-minutes: 1
+
+     # EMAIL VERIFICATION
+    resend-verification-email:
+      capacity: 3
+      refill-tokens: 3
+      refill-minutes: 1
+
+#verify email
+    verify-token:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
 
 # =========================================
 # CLOUDINARY CONFIGURATION

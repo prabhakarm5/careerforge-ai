@@ -19,13 +19,13 @@ public @interface ValidImage {
 
         String message()
 
-        default "Only JPG, JPEG, PNG and WEBP images up to 5 MB are allowed";
+        default "Only JPG, JPEG, PNG and WEBP images up to 2 MB are allowed";
 
         Class<?>[] groups() default {};
 
         Class<? extends Payload>[] payload() default {};
 
-        long maxSize() default 5 * 1024 * 1024;
+        long maxSize() default 2 * 1024 * 1024;
 
         String[] allowedTypes() default {
 
