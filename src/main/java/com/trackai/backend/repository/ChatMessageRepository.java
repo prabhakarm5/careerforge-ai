@@ -15,4 +15,6 @@ public interface ChatMessageRepository
         List<ChatMessage> findTop20ByConversationIdOrderByCreatedAtAsc(
                         String conversationId);
 
+        List<ChatMessage> findTop10ByConversationIdOrderByCreatedAtAsc(String conversationId);
+
 }

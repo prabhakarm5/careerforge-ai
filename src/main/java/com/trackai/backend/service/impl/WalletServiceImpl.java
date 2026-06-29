@@ -29,192 +29,258 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class WalletServiceImpl
-        implements WalletService {
+                implements WalletService {
 
-    private final WalletRepository walletRepository;
+        private final WalletRepository walletRepository;
 
-    private final WalletTransactionRepository walletTransactionRepository;
+        private final WalletTransactionRepository walletTransactionRepository;
 
-    private final UserRepository userRepository;
+        private final UserRepository userRepository;
 
-    @Value("${app.wallet.initial-tokens}")
-    private Long initialTokens;
+        @Value("${app.wallet.initial-tokens}")
+        private Long initialTokens;
 
-    // Get authenticated user
-    private User getAuthenticatedUser() {
+        @Value("${trackai.tokens.image}")
+        private Long imageTokens;
 
-        Authentication authentication = SecurityContextHolder
-                .getContext()
-                .getAuthentication();
+        // Get authenticated user
+        private User getAuthenticatedUser() {
 
-        String email = authentication.getName();
+                Authentication authentication = SecurityContextHolder
+                                .getContext()
+                                .getAuthentication();
 
-        return userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException(
-                        "Authenticated user not found"));
-    }
+                String email = authentication.getName();
 
-    // Create wallet
-    @Override
-    public void createWallet(String userId) {
-        // Wallet already exists
-        if (walletRepository.findByUserId(userId).isPresent()) {
-
-            throw new WalletAlreadyExistsException(
-                    "Wallet already exists");
+                return userRepository.findByEmail(email)
+                                .orElseThrow(() -> new RuntimeException(
+                                                "Authenticated user not found"));
         }
 
-        Wallet wallet = Wallet.builder()
-                .id(UUID.randomUUID().toString())
-                .userId(userId)
-                .totalTokens(initialTokens)
-                .usedTokens(0L)
-                .remainingTokens(initialTokens)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
+        // Create wallet
+        @Override
+        public void createWallet(String userId) {
+                // Wallet already exists
+                if (walletRepository.findByUserId(userId).isPresent()) {
 
-        walletRepository.save(wallet);
+                        throw new WalletAlreadyExistsException(
+                                        "Wallet already exists");
+                }
 
-        WalletTransaction transaction = WalletTransaction.builder()
-                .id(UUID.randomUUID().toString())
-                .userId(userId)
-                .amount(initialTokens)
-                .transactionType(TransactionType.CREDIT)
-                .featureType(FeatureType.BONUS)
-                .description("Welcome bonus tokens")
-                .createdAt(LocalDateTime.now())
-                .build();
+                Wallet wallet = Wallet.builder()
+                                .id(UUID.randomUUID().toString())
+                                .userId(userId)
+                                .totalTokens(initialTokens)
+                                .usedTokens(0L)
+                                .remainingTokens(initialTokens)
+                                .createdAt(LocalDateTime.now())
+                                .updatedAt(LocalDateTime.now())
+                                .build();
 
-        walletTransactionRepository.save(transaction);
-    }
+                walletRepository.save(wallet);
 
-    // Get current wallet
-    @Override
-    public WalletResponse getCurrentWallet() {
+                WalletTransaction transaction = WalletTransaction.builder()
+                                .id(UUID.randomUUID().toString())
+                                .userId(userId)
+                                .amount(initialTokens)
+                                .transactionType(TransactionType.CREDIT)
+                                .featureType(FeatureType.BONUS)
+                                .description("Welcome bonus tokens")
+                                .createdAt(LocalDateTime.now())
+                                .build();
 
-        User user = getAuthenticatedUser();
-
-        Wallet wallet = walletRepository
-                .findByUserId(user.getId())
-                .orElseThrow(() -> new WalletNotFoundException(
-                        "Wallet not found"));
-
-        return WalletResponse.builder()
-                .totalTokens(wallet.getTotalTokens())
-                .usedTokens(wallet.getUsedTokens())
-                .remainingTokens(wallet.getRemainingTokens())
-                .build();
-    }
-
-    // Add tokens
-    @Override
-    public void addTokens(
-            String userId,
-            Long amount,
-            FeatureType featureType,
-            String description) {
-
-        Wallet wallet = walletRepository
-                .findByUserId(userId)
-                .orElseThrow(() -> new WalletNotFoundException(
-                        "Wallet not found"));
-
-        wallet.setTotalTokens(
-                wallet.getTotalTokens() + amount);
-
-        wallet.setRemainingTokens(
-                wallet.getRemainingTokens() + amount);
-
-        wallet.setUpdatedAt(LocalDateTime.now());
-
-        walletRepository.save(wallet);
-
-        WalletTransaction transaction = WalletTransaction.builder()
-                .id(UUID.randomUUID().toString())
-                .userId(userId)
-                .amount(amount)
-                .transactionType(TransactionType.CREDIT)
-                .featureType(featureType)
-                .description(description)
-                .createdAt(LocalDateTime.now())
-                .build();
-
-        walletTransactionRepository.save(transaction);
-    }
-
-    // Consume tokens
-    @Override
-    public void consumeTokens(
-            String userId,
-            Long amount,
-            FeatureType featureType,
-            String description) {
-
-        Wallet wallet = walletRepository
-                .findByUserId(userId)
-                .orElseThrow(() -> new WalletNotFoundException(
-                        "Wallet not found"));
-
-        if (wallet.getRemainingTokens() < amount) {
-
-            throw new InsufficientTokensException(
-                    "Insufficient tokens");
+                walletTransactionRepository.save(transaction);
         }
 
-        wallet.setUsedTokens(
-                wallet.getUsedTokens() + amount);
+        // Get current wallet
+        @Override
+        public WalletResponse getCurrentWallet() {
 
-        wallet.setRemainingTokens(
-                wallet.getRemainingTokens() - amount);
+                User user = getAuthenticatedUser();
 
-        wallet.setUpdatedAt(LocalDateTime.now());
+                Wallet wallet = walletRepository
+                                .findByUserId(user.getId())
+                                .orElseThrow(() -> new WalletNotFoundException(
+                                                "Wallet not found"));
 
-        walletRepository.save(wallet);
+                return WalletResponse.builder()
+                                .totalTokens(wallet.getTotalTokens())
+                                .usedTokens(wallet.getUsedTokens())
+                                .remainingTokens(wallet.getRemainingTokens())
+                                .build();
+        }
 
-        WalletTransaction transaction = WalletTransaction.builder()
-                .id(UUID.randomUUID().toString())
-                .userId(userId)
-                .amount(amount)
-                .transactionType(TransactionType.DEBIT)
-                .featureType(featureType)
-                .description(description)
-                .createdAt(LocalDateTime.now())
-                .build();
+        // Add tokens
+        @Override
+        public void addTokens(
+                        String userId,
+                        Long amount,
+                        FeatureType featureType,
+                        String description) {
 
-        walletTransactionRepository.save(transaction);
-    }
+                Wallet wallet = walletRepository
+                                .findByUserId(userId)
+                                .orElseThrow(() -> new WalletNotFoundException(
+                                                "Wallet not found"));
 
-    // Check token balance
-    @Override
-    public boolean hasEnoughTokens(
-            String userId,
-            Long amount) {
+                wallet.setTotalTokens(
+                                wallet.getTotalTokens() + amount);
 
-        Wallet wallet = walletRepository
-                .findByUserId(userId)
-                .orElseThrow(() -> new WalletNotFoundException(
-                        "Wallet not found"));
+                wallet.setRemainingTokens(
+                                wallet.getRemainingTokens() + amount);
 
-        return wallet.getRemainingTokens() >= amount;
-    }
+                wallet.setUpdatedAt(LocalDateTime.now());
 
-    // Transaction history
-    @Override
-    public List<WalletTransactionResponse> getTransactionHistory() {
+                walletRepository.save(wallet);
 
-        User user = getAuthenticatedUser();
+                WalletTransaction transaction = WalletTransaction.builder()
+                                .id(UUID.randomUUID().toString())
+                                .userId(userId)
+                                .amount(amount)
+                                .transactionType(TransactionType.CREDIT)
+                                .featureType(featureType)
+                                .description(description)
+                                .createdAt(LocalDateTime.now())
+                                .build();
 
-        return walletTransactionRepository
-                .findByUserIdOrderByCreatedAtDesc(user.getId())
-                .stream()
-                .map(transaction -> WalletTransactionResponse.builder()
-                        .amount(transaction.getAmount())
-                        .transactionType(transaction.getTransactionType())
-                        .featureType(transaction.getFeatureType())
-                        .description(transaction.getDescription())
-                        .createdAt(transaction.getCreatedAt())
-                        .build())
-                .toList();
-    }
+                walletTransactionRepository.save(transaction);
+        }
+
+        // Consume tokens
+        @Override
+        public void consumeTokens(
+                        String userId,
+                        Long amount,
+                        FeatureType featureType,
+                        String description) {
+
+                Wallet wallet = walletRepository
+                                .findByUserId(userId)
+                                .orElseThrow(() -> new WalletNotFoundException(
+                                                "Wallet not found"));
+
+                if (wallet.getRemainingTokens() < amount) {
+
+                        throw new InsufficientTokensException(
+                                        "Insufficient tokens");
+                }
+
+                wallet.setUsedTokens(
+                                wallet.getUsedTokens() + amount);
+
+                wallet.setRemainingTokens(
+                                wallet.getRemainingTokens() - amount);
+
+                wallet.setUpdatedAt(LocalDateTime.now());
+
+                walletRepository.save(wallet);
+
+                WalletTransaction transaction = WalletTransaction.builder()
+                                .id(UUID.randomUUID().toString())
+                                .userId(userId)
+                                .amount(amount)
+                                .transactionType(TransactionType.DEBIT)
+                                .featureType(featureType)
+                                .description(description)
+                                .createdAt(LocalDateTime.now())
+                                .build();
+
+                walletTransactionRepository.save(transaction);
+        }
+
+        // Check token balance
+        @Override
+        public boolean hasEnoughTokens(
+                        String userId,
+                        Long amount) {
+
+                Wallet wallet = walletRepository
+                                .findByUserId(userId)
+                                .orElseThrow(() -> new WalletNotFoundException(
+                                                "Wallet not found"));
+
+                return wallet.getRemainingTokens() >= amount;
+        }
+
+        // Transaction history
+        @Override
+        public List<WalletTransactionResponse> getTransactionHistory() {
+
+                User user = getAuthenticatedUser();
+
+                return walletTransactionRepository
+                                .findByUserIdOrderByCreatedAtDesc(user.getId())
+                                .stream()
+                                .map(transaction -> WalletTransactionResponse.builder()
+                                                .amount(transaction.getAmount())
+                                                .transactionType(transaction.getTransactionType())
+                                                .featureType(transaction.getFeatureType())
+                                                .description(transaction.getDescription())
+                                                .createdAt(transaction.getCreatedAt())
+                                                .build())
+                                .toList();
+        }
+
+        @Override
+        public void checkImageGenerationTokens() {
+
+                User user = getAuthenticatedUser();
+
+                boolean available = hasEnoughTokens(
+
+                                user.getId(),
+
+                                imageTokens
+
+                );
+
+                if (!available) {
+
+                        throw new InsufficientTokensException(
+
+                                        "Insufficient tokens"
+
+                        );
+
+                }
+
+        }
+
+        @Override
+        public void consumeImageTokens(Long amount) {
+
+                User user = getAuthenticatedUser();
+
+                consumeTokens(
+
+                                user.getId(),
+
+                                amount,
+
+                                FeatureType.IMAGE,
+
+                                "AI Image Generation"
+
+                );
+
+        }
+
+        @Override
+        public void refundImageTokens(Long amount) {
+
+                User user = getAuthenticatedUser();
+
+                addTokens(
+
+                                user.getId(),
+
+                                amount,
+
+                                FeatureType.IMAGE,
+
+                                "Refund Image Tokens"
+
+                );
+
+        }
 }

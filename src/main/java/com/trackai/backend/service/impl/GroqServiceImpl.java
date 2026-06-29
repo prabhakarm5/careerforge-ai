@@ -32,61 +32,51 @@ public class GroqServiceImpl
         private String url;
 
         @Override
-        public ChatResponse generateResponse(
-                        List<GroqMessage> messages) {
+        public ChatResponse generateResponse(List<GroqMessage> messages) {
 
                 HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                headers.setBearerAuth(apiKey);
 
-                headers.setContentType(
-                                MediaType.APPLICATION_JSON);
+                // System prompt inject karo sabse pehle
+                List<GroqMessage> messagesWithSystem = new java.util.ArrayList<>();
+                messagesWithSystem.add(new GroqMessage("system",
+                                """
+                                                You are CareerForge AI, a smart and helpful assistant.
 
-                headers.setBearerAuth(
-                                apiKey);
+                                                Rules you MUST follow:
+                                                - Be concise and direct. Avoid unnecessary repetition.
+                                                - Use plain conversational language. Do NOT over-use bullet points.
+                                                - For code questions: always provide working code examples in proper code blocks.
+                                                - For general questions: answer in 2-4 short paragraphs max.
+                                                - Support Hindi, Hinglish, and English naturally — reply in whatever language the user writes in.
+                                                - NEVER say you are LLaMA, GPT, or any other model. You are CareerForge AI.
+                                                - Format code using markdown code blocks with the correct language tag (e.g. ```java, ```javascript).
+                                                - Keep answers focused. Do not pad responses with generic information.
+                                                """));
+                messagesWithSystem.addAll(messages);
 
                 GroqRequest groqRequest = GroqRequest.builder()
                                 .model(model)
-                                .messages(messages)
+                                .messages(messagesWithSystem)
                                 .build();
 
-                HttpEntity<GroqRequest> entity = new HttpEntity<>(
-                                groqRequest,
-                                headers);
+                HttpEntity<GroqRequest> entity = new HttpEntity<>(groqRequest, headers);
 
                 ResponseEntity<GroqResponse> response = restTemplate.exchange(
-                                url,
-                                HttpMethod.POST,
-                                entity,
-                                GroqResponse.class);
+                                url, HttpMethod.POST, entity, GroqResponse.class);
 
                 GroqResponse body = response.getBody();
 
-                if (body == null ||
-                                body.getChoices() == null ||
-                                body.getChoices().isEmpty()) {
-
-                        throw new RuntimeException(
-                                        "Failed to generate response");
+                if (body == null || body.getChoices() == null || body.getChoices().isEmpty()) {
+                        throw new RuntimeException("Failed to generate response");
                 }
 
                 return ChatResponse.builder()
-                                .response(
-                                                body.getChoices()
-                                                                .get(0)
-                                                                .getMessage()
-                                                                .getContent())
-
-                                .promptTokens(
-                                                body.getUsage()
-                                                                .getPromptTokens())
-
-                                .completionTokens(
-                                                body.getUsage()
-                                                                .getCompletionTokens())
-
-                                .totalTokens(
-                                                body.getUsage()
-                                                                .getTotalTokens())
-
+                                .response(body.getChoices().get(0).getMessage().getContent())
+                                .promptTokens(body.getUsage().getPromptTokens())
+                                .completionTokens(body.getUsage().getCompletionTokens())
+                                .totalTokens(body.getUsage().getTotalTokens())
                                 .build();
         }
 

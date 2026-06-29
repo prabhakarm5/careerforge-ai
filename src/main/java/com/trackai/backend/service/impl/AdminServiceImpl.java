@@ -3,6 +3,7 @@ package com.trackai.backend.service.impl;
 import com.trackai.backend.dto.ActionResponse;
 import com.trackai.backend.dto.UpdateProfileRequest;
 import com.trackai.backend.dto.UpdateProfileResponse;
+import com.trackai.backend.dto.cloudinary.CloudinaryUploadResponse;
 import com.trackai.backend.entity.User;
 import com.trackai.backend.enums.Role;
 import com.trackai.backend.repository.UserRepository;
@@ -21,465 +22,469 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class AdminServiceImpl
-        implements AdminService {
+                implements AdminService {
 
-    private final UserRepository userRepository;
+        private final UserRepository userRepository;
 
-    private final CloudinaryService cloudinaryService;
+        private final CloudinaryService cloudinaryService;
 
-    // GET ALL USERS
-    @Override
-    public List<User> getAllUsers() {
+        // GET ALL USERS
+        @Override
+        public List<User> getAllUsers() {
 
-        return userRepository.findAll();
-    }
-
-    // GET USER BY ID
-    @Override
-    public User getUserById(
-            String id) {
-
-        return userRepository.findById(id)
-
-                .orElseThrow(() ->
-
-                new RuntimeException(
-                        "User not found"));
-    }
-
-    // ENABLE USER
-    @Override
-    public ActionResponse enableUser(
-            String id) {
-
-        User user = getUserById(id);
-
-        // ADMIN ALREADY ENABLED
-        if (user.getRole() == Role.ROLE_ADMIN) {
-
-            return ActionResponse.builder()
-
-                    .message(
-                            "Admin account is always enabled")
-
-                    .action(
-                            "ENABLE_USER")
-
-                    .userId(
-                            user.getId())
-
-                    .userEmail(
-                            user.getEmail())
-
-                    .status(false)
-
-                    .build();
+                return userRepository.findAll();
         }
 
-        // ALREADY ENABLED
-        if (user.getEnabled()) {
+        // GET USER BY ID
+        @Override
+        public User getUserById(
+                        String id) {
 
-            return ActionResponse.builder()
+                return userRepository.findById(id)
 
-                    .message(
-                            "User is already enabled")
+                                .orElseThrow(() ->
 
-                    .action(
-                            "ENABLE_USER")
-
-                    .userId(
-                            user.getId())
-
-                    .userEmail(
-                            user.getEmail())
-
-                    .status(false)
-
-                    .build();
+                                new RuntimeException(
+                                                "User not found"));
         }
 
         // ENABLE USER
-        user.setEnabled(true);
+        @Override
+        public ActionResponse enableUser(
+                        String id) {
 
-        userRepository.save(user);
+                User user = getUserById(id);
 
-        return ActionResponse.builder()
+                // ADMIN ALREADY ENABLED
+                if (user.getRole() == Role.ROLE_ADMIN) {
 
-                .message(
-                        "User enabled successfully")
+                        return ActionResponse.builder()
 
-                .action(
-                        "ENABLE_USER")
+                                        .message(
+                                                        "Admin account is always enabled")
 
-                .userId(
-                        user.getId())
+                                        .action(
+                                                        "ENABLE_USER")
 
-                .userEmail(
-                        user.getEmail())
+                                        .userId(
+                                                        user.getId())
 
-                .status(true)
+                                        .userEmail(
+                                                        user.getEmail())
 
-                .build();
-    }
+                                        .status(false)
 
-    // DISABLE USER
-    @Override
-    public ActionResponse disableUser(
-            String id) {
+                                        .build();
+                }
 
-        User user = getUserById(id);
+                // ALREADY ENABLED
+                if (user.getEnabled()) {
 
-        // ADMIN PROTECTION
-        if (user.getRole() == Role.ROLE_ADMIN) {
+                        return ActionResponse.builder()
 
-            throw new RuntimeException(
-                    "Admin account cannot be disabled");
-        }
+                                        .message(
+                                                        "User is already enabled")
 
-        // ALREADY DISABLED
-        if (!user.getEnabled()) {
+                                        .action(
+                                                        "ENABLE_USER")
 
-            return ActionResponse.builder()
+                                        .userId(
+                                                        user.getId())
 
-                    .message(
-                            "User is already disabled")
+                                        .userEmail(
+                                                        user.getEmail())
 
-                    .action(
-                            "DISABLE_USER")
+                                        .status(false)
 
-                    .userId(
-                            user.getId())
+                                        .build();
+                }
 
-                    .userEmail(
-                            user.getEmail())
+                // ENABLE USER
+                user.setEnabled(true);
 
-                    .status(false)
+                userRepository.save(user);
 
-                    .build();
+                return ActionResponse.builder()
+
+                                .message(
+                                                "User enabled successfully")
+
+                                .action(
+                                                "ENABLE_USER")
+
+                                .userId(
+                                                user.getId())
+
+                                .userEmail(
+                                                user.getEmail())
+
+                                .status(true)
+
+                                .build();
         }
 
         // DISABLE USER
-        user.setEnabled(false);
+        @Override
+        public ActionResponse disableUser(
+                        String id) {
 
-        userRepository.save(user);
+                User user = getUserById(id);
 
-        return ActionResponse.builder()
+                // ADMIN PROTECTION
+                if (user.getRole() == Role.ROLE_ADMIN) {
 
-                .message(
-                        "User disabled successfully")
+                        throw new RuntimeException(
+                                        "Admin account cannot be disabled");
+                }
 
-                .action(
-                        "DISABLE_USER")
+                // ALREADY DISABLED
+                if (!user.getEnabled()) {
 
-                .userId(
-                        user.getId())
+                        return ActionResponse.builder()
 
-                .userEmail(
-                        user.getEmail())
+                                        .message(
+                                                        "User is already disabled")
 
-                .status(true)
+                                        .action(
+                                                        "DISABLE_USER")
 
-                .build();
-    }
+                                        .userId(
+                                                        user.getId())
 
-    // BLOCK USER
-    @Override
-    public ActionResponse blockUser(
-            String id) {
+                                        .userEmail(
+                                                        user.getEmail())
 
-        User user = getUserById(id);
+                                        .status(false)
 
-        // ADMIN PROTECTION
-        if (user.getRole() == Role.ROLE_ADMIN) {
+                                        .build();
+                }
 
-            throw new RuntimeException(
-                    "Admin account cannot be blocked");
-        }
+                // DISABLE USER
+                user.setEnabled(false);
 
-        // ALREADY BLOCKED
-        if (user.getBlocked()) {
+                userRepository.save(user);
 
-            return ActionResponse.builder()
+                return ActionResponse.builder()
 
-                    .message(
-                            "User is already blocked")
+                                .message(
+                                                "User disabled successfully")
 
-                    .action(
-                            "BLOCK_USER")
+                                .action(
+                                                "DISABLE_USER")
 
-                    .userId(
-                            user.getId())
+                                .userId(
+                                                user.getId())
 
-                    .userEmail(
-                            user.getEmail())
+                                .userEmail(
+                                                user.getEmail())
 
-                    .status(false)
+                                .status(true)
 
-                    .build();
+                                .build();
         }
 
         // BLOCK USER
-        user.setBlocked(true);
+        @Override
+        public ActionResponse blockUser(
+                        String id) {
 
-        userRepository.save(user);
+                User user = getUserById(id);
 
-        return ActionResponse.builder()
+                // ADMIN PROTECTION
+                if (user.getRole() == Role.ROLE_ADMIN) {
 
-                .message(
-                        "User blocked successfully")
+                        throw new RuntimeException(
+                                        "Admin account cannot be blocked");
+                }
 
-                .action(
-                        "BLOCK_USER")
+                // ALREADY BLOCKED
+                if (user.getBlocked()) {
 
-                .userId(
-                        user.getId())
+                        return ActionResponse.builder()
 
-                .userEmail(
-                        user.getEmail())
+                                        .message(
+                                                        "User is already blocked")
 
-                .status(true)
+                                        .action(
+                                                        "BLOCK_USER")
 
-                .build();
-    }
+                                        .userId(
+                                                        user.getId())
 
-    // UNBLOCK USER
-    @Override
-    public ActionResponse unblockUser(
-            String id) {
+                                        .userEmail(
+                                                        user.getEmail())
 
-        User user = getUserById(id);
+                                        .status(false)
 
-        // ADMIN ALWAYS UNBLOCKED
-        if (user.getRole() == Role.ROLE_ADMIN) {
+                                        .build();
+                }
 
-            return ActionResponse.builder()
+                // BLOCK USER
+                user.setBlocked(true);
 
-                    .message(
-                            "Admin account is always unblocked")
+                userRepository.save(user);
 
-                    .action(
-                            "UNBLOCK_USER")
+                return ActionResponse.builder()
 
-                    .userId(
-                            user.getId())
+                                .message(
+                                                "User blocked successfully")
 
-                    .userEmail(
-                            user.getEmail())
+                                .action(
+                                                "BLOCK_USER")
 
-                    .status(false)
+                                .userId(
+                                                user.getId())
 
-                    .build();
-        }
+                                .userEmail(
+                                                user.getEmail())
 
-        // ALREADY UNBLOCKED
-        if (!user.getBlocked()) {
+                                .status(true)
 
-            return ActionResponse.builder()
-
-                    .message(
-                            "User is already unblocked")
-
-                    .action(
-                            "UNBLOCK_USER")
-
-                    .userId(
-                            user.getId())
-
-                    .userEmail(
-                            user.getEmail())
-
-                    .status(false)
-
-                    .build();
+                                .build();
         }
 
         // UNBLOCK USER
-        user.setBlocked(false);
+        @Override
+        public ActionResponse unblockUser(
+                        String id) {
 
-        userRepository.save(user);
+                User user = getUserById(id);
 
-        return ActionResponse.builder()
+                // ADMIN ALWAYS UNBLOCKED
+                if (user.getRole() == Role.ROLE_ADMIN) {
 
-                .message(
-                        "User unblocked successfully")
+                        return ActionResponse.builder()
 
-                .action(
-                        "UNBLOCK_USER")
+                                        .message(
+                                                        "Admin account is always unblocked")
 
-                .userId(
-                        user.getId())
+                                        .action(
+                                                        "UNBLOCK_USER")
 
-                .userEmail(
-                        user.getEmail())
+                                        .userId(
+                                                        user.getId())
 
-                .status(true)
+                                        .userEmail(
+                                                        user.getEmail())
 
-                .build();
-    }
+                                        .status(false)
 
-    // DELETE USER
-    @Override
-    public ActionResponse deleteUser(
-            String id) {
+                                        .build();
+                }
 
-        User user = getUserById(id);
+                // ALREADY UNBLOCKED
+                if (!user.getBlocked()) {
 
-        // ADMIN PROTECTION
-        if (user.getRole() == Role.ROLE_ADMIN) {
+                        return ActionResponse.builder()
 
-            throw new RuntimeException(
-                    "Admin account cannot be deleted");
+                                        .message(
+                                                        "User is already unblocked")
+
+                                        .action(
+                                                        "UNBLOCK_USER")
+
+                                        .userId(
+                                                        user.getId())
+
+                                        .userEmail(
+                                                        user.getEmail())
+
+                                        .status(false)
+
+                                        .build();
+                }
+
+                // UNBLOCK USER
+                user.setBlocked(false);
+
+                userRepository.save(user);
+
+                return ActionResponse.builder()
+
+                                .message(
+                                                "User unblocked successfully")
+
+                                .action(
+                                                "UNBLOCK_USER")
+
+                                .userId(
+                                                user.getId())
+
+                                .userEmail(
+                                                user.getEmail())
+
+                                .status(true)
+
+                                .build();
         }
 
         // DELETE USER
-        userRepository.delete(user);
+        @Override
+        public ActionResponse deleteUser(
+                        String id) {
 
-        return ActionResponse.builder()
+                User user = getUserById(id);
 
-                .message(
-                        "User deleted successfully")
+                // ADMIN PROTECTION
+                if (user.getRole() == Role.ROLE_ADMIN) {
 
-                .action(
-                        "DELETE_USER")
+                        throw new RuntimeException(
+                                        "Admin account cannot be deleted");
+                }
 
-                .userId(
-                        user.getId())
+                // DELETE USER
+                userRepository.delete(user);
 
-                .userEmail(
-                        user.getEmail())
+                return ActionResponse.builder()
 
-                .status(true)
+                                .message(
+                                                "User deleted successfully")
 
-                .build();
-    }
+                                .action(
+                                                "DELETE_USER")
 
-    // GET CURRENT ADMIN
-    @Override
-    public User getCurrentAdmin() {
+                                .userId(
+                                                user.getId())
 
-        Authentication authentication =
+                                .userEmail(
+                                                user.getEmail())
 
-                SecurityContextHolder
+                                .status(true)
 
-                        .getContext()
-
-                        .getAuthentication();
-
-        String email = authentication.getName();
-
-        User admin = userRepository
-
-                .findByEmail(email)
-
-                .orElseThrow(() ->
-
-                new RuntimeException(
-                        "Admin not found"));
-
-        // ROLE CHECK
-        if (admin.getRole() != Role.ROLE_ADMIN) {
-
-            throw new RuntimeException(
-                    "Access denied");
+                                .build();
         }
 
-        return admin;
-    }
+        // GET CURRENT ADMIN
+        @Override
+        public User getCurrentAdmin() {
 
-    // UPDATE CURRENT ADMIN
-    @Override
-    public UpdateProfileResponse updateCurrentAdmin(
-            UpdateProfileRequest request) {
+                Authentication authentication =
 
-        // GET ADMIN
-        User admin = getCurrentAdmin();
+                                SecurityContextHolder
 
-        List<String> updatedFields = new ArrayList<>();
+                                                .getContext()
 
-        List<String> restrictedFields = List.of(
-                "email",
-                "mobileNumber",
-                "password",
-                "role",
-                "enabled",
-                "blocked");
+                                                .getAuthentication();
 
-        // UPDATE NAME
-        if (request.getName() != null
-                &&
-                !request.getName()
+                String email = authentication.getName();
 
-                        .equals(admin.getName())) {
+                User admin = userRepository
 
-            admin.setName(
-                    request.getName());
+                                .findByEmail(email)
 
-            updatedFields.add(
-                    "name");
+                                .orElseThrow(() ->
+
+                                new RuntimeException(
+                                                "Admin not found"));
+
+                // ROLE CHECK
+                if (admin.getRole() != Role.ROLE_ADMIN) {
+
+                        throw new RuntimeException(
+                                        "Access denied");
+                }
+
+                return admin;
         }
 
-        // UPDATE DESCRIPTION
-        if (request.getDescription() != null
-                &&
-                !request.getDescription()
+        // UPDATE CURRENT ADMIN
+        @Override
+        public UpdateProfileResponse updateCurrentAdmin(
+                        UpdateProfileRequest request) {
 
-                        .equals(admin.getDescription())) {
+                // GET ADMIN
+                User admin = getCurrentAdmin();
 
-            admin.setDescription(
-                    request.getDescription());
+                List<String> updatedFields = new ArrayList<>();
 
-            updatedFields.add(
-                    "description");
+                List<String> restrictedFields = List.of(
+                                "email",
+                                "mobileNumber",
+                                "password",
+                                "role",
+                                "enabled",
+                                "blocked");
+
+                // UPDATE NAME
+                if (request.getName() != null
+                                &&
+                                !request.getName()
+
+                                                .equals(admin.getName())) {
+
+                        admin.setName(
+                                        request.getName());
+
+                        updatedFields.add(
+                                        "name");
+                }
+
+                // UPDATE DESCRIPTION
+                if (request.getDescription() != null
+                                &&
+                                !request.getDescription()
+
+                                                .equals(admin.getDescription())) {
+
+                        admin.setDescription(
+                                        request.getDescription());
+
+                        updatedFields.add(
+                                        "description");
+                }
+
+                // UPDATE IMAGE
+                if (request.getProfileImage() != null
+                                &&
+                                !request.getProfileImage()
+                                                .isEmpty()) {
+
+                        // DELETE OLD IMAGE
+                        if (admin.getProfileImage() != null
+                                        &&
+                                        !admin.getProfileImage()
+                                                        .isBlank()) {
+
+                                cloudinaryService.deleteImage(
+                                                admin.getProfileImage());
+                        }
+
+                        // UPLOAD NEW IMAGE
+                        CloudinaryUploadResponse upload =
+
+                                        cloudinaryService.uploadProfileImage(
+
+                                                        request.getProfileImage()
+
+                                        );
+
+                        admin.setProfileImage(
+
+                                        upload.getSecureUrl()
+
+                        );
+
+                        updatedFields.add(
+                                        "profileImage");
+                }
+
+                // SAVE ADMIN
+                userRepository.save(admin);
+
+                return UpdateProfileResponse.builder()
+
+                                .message(
+                                                "Admin profile updated successfully")
+
+                                .updatedFields(
+                                                updatedFields)
+
+                                .restrictedFields(
+                                                restrictedFields)
+
+                                .profileImage(
+                                                admin.getProfileImage())
+
+                                .build();
         }
-
-        // UPDATE IMAGE
-        if (request.getProfileImage() != null
-                &&
-                !request.getProfileImage()
-                        .isEmpty()) {
-
-            // DELETE OLD IMAGE
-            if (admin.getProfileImage() != null
-                    &&
-                    !admin.getProfileImage()
-                            .isBlank()) {
-
-                cloudinaryService.deleteImage(
-                        admin.getProfileImage());
-            }
-
-            // UPLOAD NEW IMAGE
-            String imageUrl =
-
-                    cloudinaryService
-                            .uploadImage(
-
-                                    request.getProfileImage());
-
-            admin.setProfileImage(
-                    imageUrl);
-
-            updatedFields.add(
-                    "profileImage");
-        }
-
-        // SAVE ADMIN
-        userRepository.save(admin);
-
-        return UpdateProfileResponse.builder()
-
-                .message(
-                        "Admin profile updated successfully")
-
-                .updatedFields(
-                        updatedFields)
-
-                .restrictedFields(
-                        restrictedFields)
-
-                .profileImage(
-                        admin.getProfileImage())
-
-                .build();
-    }
 }

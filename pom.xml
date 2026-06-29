@@ -27,6 +27,8 @@
         <java.version>21</java.version>
     </properties>
 
+
+
     <!-- DEPENDENCIES -->
     <dependencies>
 
@@ -134,6 +136,12 @@
     <groupId>me.paulschwarz</groupId>
     <artifactId>spring-dotenv</artifactId>
     <version>4.0.0</version>
+</dependency>
+
+  <!--web flux-->
+    <dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-webflux</artifactId>
 </dependency>
 
         <!-- TEST -->

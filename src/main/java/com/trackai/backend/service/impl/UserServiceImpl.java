@@ -2,6 +2,7 @@ package com.trackai.backend.service.impl;
 
 import com.trackai.backend.dto.UpdateProfileRequest;
 import com.trackai.backend.dto.UpdateProfileResponse;
+import com.trackai.backend.dto.cloudinary.CloudinaryUploadResponse;
 import com.trackai.backend.entity.User;
 import com.trackai.backend.repository.UserRepository;
 import com.trackai.backend.service.CloudinaryService;
@@ -145,15 +146,18 @@ public class UserServiceImpl
                         }
 
                         // UPLOAD NEW IMAGE
-                        String imageUrl =
+                        CloudinaryUploadResponse upload =
 
                                         cloudinaryService
-                                                        .uploadImage(
-                                                                        profileImage);
 
-                        // SAVE IMAGE
+                                                        .uploadProfileImage(profileImage);
+
+                        // save
                         user.setProfileImage(
-                                        imageUrl);
+
+                                        upload.getSecureUrl()
+
+                        );
 
                         updatedFields.add(
                                         "profileImage");

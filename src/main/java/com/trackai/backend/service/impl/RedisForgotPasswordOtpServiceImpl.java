@@ -126,4 +126,35 @@ public class RedisForgotPasswordOtpServiceImpl
                                 redisTemplate.hasKey(
                                                 RESEND_PREFIX + email));
         }
+
+        @Override
+        public void markOtpVerified(
+                        String email) {
+
+                email = normalizeEmail(email);
+
+                redisTemplate.opsForValue()
+
+                                .set(
+
+                                                VERIFIED_PREFIX + email,
+
+                                                "true",
+
+                                                Duration.ofMinutes(10)
+
+                                );
+        }
+
+        @Override
+        public void deleteVerifiedFlag(
+                        String email) {
+
+                email = normalizeEmail(email);
+                redisTemplate.delete(
+
+                                VERIFIED_PREFIX + email
+
+                );
+        }
 }

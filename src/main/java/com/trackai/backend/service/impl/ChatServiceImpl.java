@@ -11,6 +11,7 @@ import com.trackai.backend.entity.ChatMessage;
 import com.trackai.backend.entity.Conversation;
 import com.trackai.backend.entity.User;
 import com.trackai.backend.enums.FeatureType;
+import com.trackai.backend.exception.RateLImitException;
 import com.trackai.backend.repository.ChatMessageRepository;
 import com.trackai.backend.repository.ChatRepository;
 import com.trackai.backend.repository.ConversationRepository;
@@ -29,6 +30,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -70,29 +72,27 @@ public class ChatServiceImpl
         }
 
         // ===================== TITLE =====================
-        private String generateTitle(
-                        String message) {
+        private String generateTitle(String message) {
+                String title;
 
                 try {
-
-                        return groqService
-                                        .generateTitle(
-                                                        message);
-
+                        title = groqService.generateTitle(message);
+                } catch (Exception e) {
+                        title = message;
                 }
 
-                catch (Exception e) {
-
-                        if (message.length() <= 40) {
-
-                                return message;
-                        }
-
-                        return message.substring(
-                                        0,
-                                        40)
-                                        + "...";
+                // null/blank guard
+                if (title == null || title.isBlank()) {
+                        title = message;
                 }
+
+                // hard cap — Groq ka title bhi ho to truncate
+                title = title.trim();
+                if (title.length() > 80) {
+                        title = title.substring(0, 80) + "...";
+                }
+
+                return title;
         }
 
         // ===================== CREATE CONVERSATION =====================
@@ -197,26 +197,19 @@ public class ChatServiceImpl
         }
 
         // ===================== MEMORY =====================
-        private List<GroqMessage> buildConversationMemory(
-                        String conversationId) {
-
+        // NOTE: Stream.toList() returns an IMMUTABLE list, which caused
+        // UnsupportedOperationException when we later called messages.add(...)
+        // in sendMessage(). Switched to Collectors.toList() which returns a
+        // mutable ArrayList, so .add() works fine now.
+        // Top20 → Top10 karo (memory kam, TPM limit hit nahi hogi)
+        private List<GroqMessage> buildConversationMemory(String conversationId) {
                 return chatMessageRepository
-
-                                .findTop20ByConversationIdOrderByCreatedAtAsc(
-                                                conversationId)
-
+                                .findTop10ByConversationIdOrderByCreatedAtAsc(conversationId)
                                 .stream()
-
-                                .map(message ->
-
-                                new GroqMessage(
-
-                                                message.getRole()
-                                                                .toLowerCase(),
-
+                                .map(message -> new GroqMessage(
+                                                message.getRole().toLowerCase(),
                                                 message.getContent()))
-
-                                .toList();
+                                .collect(Collectors.toList());
         }
 
         @Override
@@ -246,9 +239,7 @@ public class ChatServiceImpl
 
                 if (!rateLimitResponse.isAllowed()) {
 
-                        throw new RuntimeException(
-
-                                        rateLimitResponse.getMessage());
+                        throw new RateLImitException(rateLimitResponse.getMessage());
                 }
 
                 Conversation conversation;

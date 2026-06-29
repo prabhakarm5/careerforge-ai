@@ -5,6 +5,7 @@ import lombok.*;
 
 import java.time.LocalDateTime;
 
+import com.trackai.backend.dto.cloudinary.CloudinaryUploadResponse;
 import com.trackai.backend.enums.Role;
 
 @Entity
@@ -49,4 +50,7 @@ public class User {
     private Boolean emailVerified = false;
 
     private String profileImage;
+
+    @Column
+    LocalDateTime passwordChangedAt;
 }

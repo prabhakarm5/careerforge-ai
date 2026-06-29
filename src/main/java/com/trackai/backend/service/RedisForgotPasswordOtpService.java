@@ -33,4 +33,12 @@ public interface RedisForgotPasswordOtpService {
 
         // DELETE VERIFIED STATE
         void deleteVerifiedState(String email);
+
+        // MARK OTP AS VERIFIED
+        void markOtpVerified(
+                        String email);
+
+        // DELETE VERIFIED FLAG
+        void deleteVerifiedFlag(
+                        String email);
 }

@@ -28,6 +28,8 @@ public class ConversationServiceImpl
 
         private final UserRepository userRepository;
 
+        private String conversationNOtFound = "Conversation not found";
+
         private User getAuthenticatedUser() {
 
                 Authentication authentication = SecurityContextHolder
@@ -120,7 +122,7 @@ public class ConversationServiceImpl
                                                 .findById(conversationId)
 
                                                 .orElseThrow(() -> new RuntimeException(
-                                                                "Conversation not found"));
+                                                                conversationNOtFound));
 
                 List<ChatMessageResponse> messages =
 
@@ -179,7 +181,7 @@ public class ConversationServiceImpl
                                 .findById(conversationId)
 
                                 .orElseThrow(() -> new RuntimeException(
-                                                "Conversation not found"));
+                                                conversationNOtFound));
 
                 conversation.setArchived(true);
 
@@ -195,7 +197,7 @@ public class ConversationServiceImpl
                                 .findById(conversationId)
 
                                 .orElseThrow(() -> new RuntimeException(
-                                                "Conversation not found"));
+                                                conversationNOtFound));
 
                 conversation.setArchived(false);
 
@@ -230,7 +232,7 @@ public class ConversationServiceImpl
                                 .orElseThrow(() ->
 
                                 new RuntimeException(
-                                                "Conversation not found"));
+                                                conversationNOtFound));
 
                 conversation.setTitle(
                                 title);
@@ -250,7 +252,7 @@ public class ConversationServiceImpl
                                 .orElseThrow(() ->
 
                                 new RuntimeException(
-                                                "Conversation not found"));
+                                                conversationNOtFound));
 
                 conversation.setPinned(
                                 true);
@@ -270,7 +272,7 @@ public class ConversationServiceImpl
                                 .orElseThrow(() ->
 
                                 new RuntimeException(
-                                                "Conversation not found"));
+                                                conversationNOtFound));
 
                 conversation.setPinned(
                                 false);

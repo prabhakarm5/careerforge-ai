@@ -21,10 +21,12 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
+import java.time.LocalDateTime;
 
 @Service
 @RequiredArgsConstructor
@@ -64,6 +66,7 @@ public class ForgotPasswordServiceImpl
 
         // Send forgot password OTP
         @Override
+
         public void sendForgotPasswordOtp(String email) {
 
                 // Rate limit
@@ -282,6 +285,8 @@ public class ForgotPasswordServiceImpl
                 // Update password
                 user.setPassword(
                                 passwordEncoder.encode(newPassword));
+                user.setPasswordChangedAt(
+                                LocalDateTime.now());
 
                 // Save user
                 userRepository.save(user);
@@ -301,6 +306,7 @@ public class ForgotPasswordServiceImpl
                 log.info("Password reset successful for email: {}", email);
 
                 log.info("All devices logged out for email: {}", email);
+
         }
 
         // Resend forgot password OTP

@@ -19,6 +19,25 @@ public class ChatController {
 
     private final ChatService chatService;
 
+    /**
+     * Send a chat message.
+     *
+     * Request body example for a NEW conversation:
+     * {
+     * "message": "Hello, how are you?"
+     * }
+     *
+     * Request body example to CONTINUE an existing conversation
+     * (this is how "click on a chat and keep chatting in it" works):
+     * {
+     * "message": "What did I ask you earlier?",
+     * "conversationId": "the-id-you-got-from-GET-/api/conversations"
+     * }
+     *
+     * If conversationId is null/blank -> a brand new conversation is created.
+     * If conversationId is provided -> the message is appended to that
+     * same conversation (handled inside ChatServiceImpl.sendMessage()).
+     */
     @PostMapping
     public ResponseEntity<ChatResponse> chat(
             @Valid @RequestBody SendMessageRequest request) {
@@ -28,4 +47,5 @@ public class ChatController {
                 chatService.sendMessage(
                         request));
     }
+
 }

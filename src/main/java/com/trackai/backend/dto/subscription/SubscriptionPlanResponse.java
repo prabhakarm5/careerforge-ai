@@ -20,4 +20,5 @@ public class SubscriptionPlanResponse {
     private String description;
 
     private Boolean active;
+
 }

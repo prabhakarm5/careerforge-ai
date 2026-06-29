@@ -6,6 +6,7 @@ import com.trackai.backend.dto.LoginResponse;
 import com.trackai.backend.dto.RateLimitResponse;
 import com.trackai.backend.dto.RefreshTokenResponse;
 import com.trackai.backend.dto.RegisterRequest;
+import com.trackai.backend.dto.cloudinary.CloudinaryUploadResponse;
 import com.trackai.backend.entity.User;
 import com.trackai.backend.enums.Role;
 import com.trackai.backend.repository.UserRepository;
@@ -102,8 +103,16 @@ public class AuthServiceImpl implements AuthService {
                 if (request.getProfileImage() != null
                                 && !request.getProfileImage().isEmpty()) {
 
-                        profileImage = cloudinaryService.uploadImage(
-                                        request.getProfileImage());
+                        CloudinaryUploadResponse upload =
+
+                                        cloudinaryService.uploadProfileImage(
+
+                                                        request.getProfileImage()
+
+                                        );
+
+                        profileImage = upload.getSecureUrl();
+
                 }
 
                 // Create user
@@ -174,7 +183,7 @@ public class AuthServiceImpl implements AuthService {
                 User user = userRepository
                                 .findByEmail(email)
                                 .orElseThrow(() -> new RuntimeException(
-                                                "Invalid email or password"));
+                                                "User is not registered please register the user first"));
 
                 // Block admin login
                 if (user.getRole().name().equals("ROLE_ADMIN")) {
@@ -189,7 +198,7 @@ public class AuthServiceImpl implements AuthService {
                                 user.getPassword())) {
 
                         throw new RuntimeException(
-                                        "Invalid email or password");
+                                        "Invalid password please check your password");
                 }
 
                 // Email verification
@@ -230,7 +239,6 @@ public class AuthServiceImpl implements AuthService {
                                 user.getEmail(),
                                 fingerprint,
                                 refreshToken);
-
                 // Response
                 return LoginResponse.builder()
                                 .id(user.getId())
@@ -240,6 +248,8 @@ public class AuthServiceImpl implements AuthService {
                                 .accessToken(accessToken)
                                 .refreshToken(refreshToken)
                                 .fingerprint(fingerprint)
+                                .profileImage(user.getProfileImage())
+
                                 .build();
         }
 

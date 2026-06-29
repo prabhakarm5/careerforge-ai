@@ -1,340 +1,339 @@
+# =====================================================================
+# APPLICATION CONFIGURATION — CareerForge AI (TrackAI Backend)
+# =====================================================================
+# NOTE: Sabhi sensitive values .env se inject ho rahe hain
+#       Kabhi bhi hardcode mat karo secrets/passwords/keys
+# =====================================================================
+
 # =========================================
-# SERVER CONFIGURATION
+# SERVER
 # =========================================
 server:
-  # App is configured to run on port 9092 (default agar env var na ho)
   port: ${SERVER_PORT:9092}
 
+# =========================================
+# SPRING BOOT CORE
+# =========================================
 spring:
 
   # ---------------------------------------
-  # DATABASE (MySQL) CONFIGURATION
+  # DATABASE — MySQL (HikariCP Pool)
   # ---------------------------------------
   datasource:
-    url: ${DB_URL}                      # MySQL connection string (host + db name)
-    username: ${DB_USERNAME}            # MySQL username
-    password: ${DB_PASSWORD}            # MySQL password (secret - kept in .env)
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20       # Max concurrent DB connections
+      minimum-idle: 5             # Minimum idle connections
+      connection-timeout: 30000   # 30s — agar connection na mile toh fail karo
+      idle-timeout: 600000        # 10 min — idle connection recycle
+      max-lifetime: 1800000       # 30 min — connection max age
 
   # ---------------------------------------
-  # JPA / HIBERNATE CONFIGURATION
+  # JPA / HIBERNATE
   # ---------------------------------------
   jpa:
-
     hibernate:
-      ddl-auto: update                  # Auto-update DB schema based on entities
-
-    show-sql: true                      # Log SQL queries in console (dev only)
-
+      ddl-auto: update         # PRODUCTION SAFE — schema auto-change nahi hoga
+    show-sql: false               # Production mein SQL log off
     properties:
-
       hibernate:
-         format_sql: true                # Pretty-print SQL logs
+        format_sql: false
+        dialect: org.hibernate.dialect.MySQLDialect
 
   # ---------------------------------------
-  # EMAIL (SMTP via Gmail) CONFIGURATION
-  # Used for: OTP, verification emails, password reset
+  # FILE UPLOAD LIMITS
+  # ---------------------------------------
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 5MB          # Single file max size
+      max-request-size: 6MB       # Total request max size (file + metadata)
+
+  # ---------------------------------------
+  # EMAIL — SMTP (Gmail)
   # ---------------------------------------
   mail:
-
     host: smtp.gmail.com
-
     port: 587
-
-    username: ${MAIL_USERNAME}          # Gmail address sending the mails
-    password: ${MAIL_PASSWORD}          # Gmail App Password (NOT your normal Gmail password)
-
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
     properties:
-
       mail:
-
         smtp:
-
           auth: true
-
           starttls:
+            enable: true
 
-            enable: true                # Required for Gmail SMTP
+  # # ---------------------------------------
+  # # REDIS — Token/OTP/Session Cache
+  # # ---------------------------------------
+  # data:
+  #   redis:
+  #     host: ${REDIS_HOST:localhost}
+  #     port: ${REDIS_PORT:6379}
+  #     password: ${REDIS_PASSWORD}
+  #     timeout: 2000ms
 
-  # ---------------------------------------
-  # REDIS CONFIGURATION
-  # Used for: rate limiting, caching, token blacklisting
-  # ---------------------------------------
+#upstash
   data:
-
     redis:
+      host: ${UPSTASH_REDIS_HOST}
+      port: ${UPSTASH_REDIS_PORT}
+      password: ${UPSTASH_REDIS_TOKEN}
+      ssl:
+        enabled: true
 
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
+      
 
 # =========================================
-# CUSTOM APPLICATION SETTINGS (app.*)
+# SPRING ACTUATOR — Hardened for Production
+# =========================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health           # Sirf /health expose karo — baki sab band
+  endpoint:
+    health:
+      show-details: never         # Internal details public mat karo
+
+# =========================================
+# CUSTOM APP SETTINGS
 # =========================================
 app:
 
-  # ---------------------------------------
-  # WALLET / TOKEN SYSTEM
-  # Tokens given to new users on signup (for AI features usage)
-  # ---------------------------------------
-  wallet:
-
-    initial-tokens: 100
-
-  # Base URL used in email links (verification, reset password, etc.)
   frontend-url: ${FRONTEND_URL}
 
   # ---------------------------------------
-  # MAIL CONTENT SETTINGS
+  # WALLET
+  # ---------------------------------------
+  wallet:
+    initial-tokens: 100           # New user signup pe default token balance
+
+  # ---------------------------------------
+  # MAIL SETTINGS
   # ---------------------------------------
   mail:
-
-    from-name:
-      TrackAI Security Team             # Sender name shown in emails
-
-    verification-expiry-minutes:
-      15                                # Signup verification link validity
-
-    resend-wait-minutes:
-      1                                 # Cooldown before resending verification mail
+    from-name: TrackAI Security Team
+    verification-expiry-minutes: 15
+    resend-wait-minutes: 1
 
   # ---------------------------------------
-  # JWT TOKEN EXPIRY SETTINGS (Normal Users)
+  # JWT TOKENS
   # ---------------------------------------
   jwt:
-
-    access-token-expiry:
-      15m                               # Short-lived access token
-
-    refresh-token-expiry:
-      7d                                # Long-lived refresh token
+    secret: ${JWT_SECRET}
+    access-token-expiry: 15m
+    refresh-token-expiry: 7d
 
   # ---------------------------------------
-  # ADMIN SESSION SETTINGS (separate from user JWT)
+  # ADMIN SESSION
   # ---------------------------------------
   admin:
-
-    access-token-expiry:
-      10m
-
-    refresh-token-expiry:
-      1d
-
-    absolute-session-expiry:
-      1d                                # Hard cutoff - admin must re-login after this regardless
+    access-token-expiry: 10m
+    refresh-token-expiry: 1d
+    absolute-session-expiry: 1d
 
   # ---------------------------------------
-  # OTP SETTINGS (used during login/signup verification)
+  # OTP SETTINGS
   # ---------------------------------------
   otp:
+    expiry-minutes: 5
+    resend-wait-minutes: 2
 
-    expiry-minutes:
-      5
-
-    resend-wait-minutes:
-      2
-
-  # ---------------------------------------
-  # FORGOT PASSWORD FLOW SETTINGS
-  # ---------------------------------------
   forgot-password:
-
-    otp-expiry-minutes:
-      5
-
-    resend-wait-minutes:
-      2
+    otp-expiry-minutes: 5
+    resend-wait-minutes: 2
 
   # ---------------------------------------
-  # RATE LIMITING (Token Bucket Algorithm via Redis)
-  # capacity = max requests allowed in burst
-  # refill-tokens = tokens added back per refill window
-  # refill-minutes = how often refill happens
+  # RATE LIMITING (Token Bucket per endpoint)
+  # Format: capacity = max burst, refill = tokens/minute
   # ---------------------------------------
   rate-limit:
 
-    # USER LOGIN
+    # --- Auth Endpoints ---
     login:
       capacity: 5
       refill-tokens: 5
       refill-minutes: 1
 
-    # REFRESH TOKEN
-    refresh-token:
-      capacity: 10
-      refill-tokens: 10
-      refill-minutes: 1
-
-    # ADMIN LOGIN
-    admin-login:
-      capacity: 3
-      refill-tokens: 3
-      refill-minutes: 1
-
-    # VERIFY ADMIN OTP
-    verify-admin-otp:
-      capacity: 5
-      refill-tokens: 5
-      refill-minutes: 1
-
-    # RESEND ADMIN OTP
-    resend-admin-otp:
-      capacity: 3
-      refill-tokens: 3
-      refill-minutes: 1
-
-    # FORGOT PASSWORD
-    forgot-password:
-      capacity: 5
-      refill-tokens: 5
-      refill-minutes: 1
-
-    # VERIFY FORGOT PASSWORD OTP
-    verify-forgot-password-otp:
-      capacity: 5
-      refill-tokens: 5
-      refill-minutes: 1
-
-    # RESEND FORGOT PASSWORD OTP
-    resend-forgot-password-otp:
-      capacity: 3
-      refill-tokens: 3
-      refill-minutes: 1
-
-    # RESET PASSWORD
-    reset-password:
-      capacity: 5
-      refill-tokens: 5
-      refill-minutes: 1
-
-    # REGISTER (signup)
     register:
       capacity: 5
       refill-tokens: 5
       refill-minutes: 1
 
-    # LOGOUT
     logout:
       capacity: 10
       refill-tokens: 10
       refill-minutes: 1
 
-    # CHAT AI feature
-    chat:
-      capacity: 20
-      refill-tokens: 20
-      refill-minutes: 1
-
-    # IMAGE GENERATION feature
-    image:
+    refresh-token:
       capacity: 10
       refill-tokens: 10
       refill-minutes: 1
 
-    # IMAGE VISION (analyze uploaded image) feature
-    vision:
-      capacity: 15
-      refill-tokens: 15
-      refill-minutes: 1
-
-    # PDF AI (ATS score / PDF generation) feature
-    pdf:
-      capacity: 10
-      refill-tokens: 10
-      refill-minutes: 1
-
-    # WEBSITE GENERATOR feature
-    website-generator:
-      capacity: 5
-      refill-tokens: 5
-      refill-minutes: 1
-
-    # CREATE ORDER (Razorpay payment initiation)
-    create-order:
-      capacity: 5
-      refill-tokens: 5
-      refill-minutes: 1
-
-    # VERIFY PAYMENT (Razorpay webhook/callback)
-    verify-payment:
-      capacity: 10
-      refill-tokens: 10
-      refill-minutes: 1  
-
-    # PAYMENT HISTORY (view past transactions)
-    payment-history:
-      capacity: 50
-      refill-tokens: 50
-      refill-minutes: 1  
-
-    # ADMIN - SUBSCRIPTION PLAN MANAGEMENT (create plan)
-    create-plan:
-     capacity: 10
-     refill-tokens: 10
-     refill-minutes: 1
-
-    # GET ALL PLANS (for users to view available subscriptions)
-    get-plans:
-     capacity: 100
-     refill-tokens: 100
-     refill-minutes: 1
-
-    # UPDATE PLAN (admin edits existing plan)
-    update-plan:
-     capacity: 10
-     refill-tokens: 10
-     refill-minutes: 1
-
-    # DELETE PLAN (admin removes a plan)
-    delete-plan:
-     capacity: 5
-     refill-tokens: 5
-     refill-minutes: 1
-
-     # EMAIL VERIFICATION
+    # --- Email Verification ---
     resend-verification-email:
       capacity: 3
       refill-tokens: 3
       refill-minutes: 1
 
-#verify email
     verify-token:
       capacity: 5
       refill-tokens: 5
       refill-minutes: 1
 
+    # --- Forgot Password Flow ---
+    forgot-password:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    verify-forgot-password-otp:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    resend-forgot-password-otp:
+      capacity: 3
+      refill-tokens: 3
+      refill-minutes: 1
+
+    reset-password:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    # --- Admin Endpoints ---
+    admin-login:
+      capacity: 3
+      refill-tokens: 3
+      refill-minutes: 1
+
+    verify-admin-otp:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    resend-admin-otp:
+      capacity: 3
+      refill-tokens: 3
+      refill-minutes: 1
+
+    # --- AI Features ---
+    chat:
+      capacity: 20
+      refill-tokens: 20
+      refill-minutes: 1
+
+    image:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+
+    vision:
+      capacity: 15
+      refill-tokens: 15
+      refill-minutes: 1
+
+    pdf:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+
+    website-generator:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    # --- Payments ---
+    create-order:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    verify-payment:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+
+    payment-history:
+      capacity: 50
+      refill-tokens: 50
+      refill-minutes: 1
+
+    # --- Plans (Admin) ---
+    create-plan:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+
+    get-plans:
+      capacity: 100
+      refill-tokens: 100
+      refill-minutes: 1
+
+    update-plan:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+
+    delete-plan:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
 # =========================================
-# CLOUDINARY CONFIGURATION
-# Used for: storing/serving uploaded images, generated images, PDFs etc.
+# CLOUDINARY — Media Storage
 # =========================================
 cloudinary:
-
-  cloud-name:
-    ${CLOUDINARY_CLOUD_NAME}
-
-  api-key:
-    ${CLOUDINARY_API_KEY}
-
-  api-secret:
-    ${CLOUDINARY_API_SECRET}
+  cloud-name: ${CLOUDINARY_CLOUD_NAME}
+  api-key: ${CLOUDINARY_API_KEY}
+  api-secret: ${CLOUDINARY_API_SECRET}
 
 # =========================================
-# GROQ AI CONFIGURATION
-# Used for: Chat AI feature (LLM calls)
+# GROQ AI — LLM Inference
 # =========================================
 groq:
-
   api-key: ${GROQ_API_KEY}
-
-  model: llama-3.3-70b-versatile        # Model used for chat completions
-
-  url: https://api.groq.com/openai/v1/chat/completions  
+  model: meta-llama/llama-4-scout-17b-16e-instruct
+  url: https://api.groq.com/openai/v1/chat/completions
 
 # =========================================
-# RAZORPAY CONFIGURATION
-# Used for: subscription/wallet payments
+# OPENROUTER — Image Generation (Gemini)
+# =========================================
+openrouter:
+  api-key: ${OPENROUTER_API_KEY}
+  base-url: https://openrouter.ai/api/v1
+  image-endpoint: /images/generations
+  image-model: google/gemini-3.1-flash-image
+  timeout: 120                    # seconds
+
+# =========================================
+# RAZORPAY — Payment Gateway
 # =========================================
 razorpay:
-
   key-id: ${RAZORPAY_KEY_ID}
-
   key-secret: ${RAZORPAY_KEY_SECRET}
+  webhook-secret: ${RAZORPAY_WEBHOOK_SECRET}  # Fake payment attacks se protection
+
+# =========================================
+# NGROK — Local Tunneling (Dev only)
+# =========================================
+ngrok:
+  authtoken: ${NGROK_AUTH_TOKEN}
+
+# =========================================
+# TOKEN COSTS PER FEATURE (TrackAI Wallet)
+# =========================================
+trackai:
+  tokens:
+    chat: 10
+    image: 200
+    resume: 100
+    website: 500
+    pdf: 50
+    audio: 80

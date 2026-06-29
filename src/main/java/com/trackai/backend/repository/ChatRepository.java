@@ -7,8 +7,9 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.List;
 
 public interface ChatRepository
-        extends JpaRepository<ChatHistory, String> {
+                extends JpaRepository<ChatHistory, String> {
 
-    List<ChatHistory> findByUserIdOrderByCreatedAtDesc(
-            String userId);
+        List<ChatHistory> findByUserIdOrderByCreatedAtDesc(
+                        String userId);
+
 }

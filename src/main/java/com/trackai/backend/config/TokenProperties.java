@@ -1,0 +1,27 @@
+package com.trackai.backend.config;
+
+import lombok.Getter;
+import lombok.Setter;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+
+@Getter
+@Setter
+@Component
+@ConfigurationProperties(prefix = "trackai.tokens")
+public class TokenProperties {
+
+    private Long chat;
+
+    private Long image;
+
+    private Long resume;
+
+    private Long website;
+
+    private Long pdf;
+
+    private Long audio;
+
+}

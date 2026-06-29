@@ -3,17 +3,17 @@ package com.trackai.backend.service.impl;
 import com.trackai.backend.config.RateLimitProperties;
 import com.trackai.backend.dto.RateLimitResponse;
 import com.trackai.backend.entity.User;
-import com.trackai.backend.exception.ResendCooldownException;
+import com.trackai.backend.exception.RateLImitException;
 import com.trackai.backend.repository.UserRepository;
 import com.trackai.backend.service.EmailVerificationService;
 import com.trackai.backend.service.MailService;
 import com.trackai.backend.service.RedisEmailVerificationTokenService;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-
-import java.time.Duration;
 import java.util.UUID;
 
 @Service
@@ -40,6 +40,8 @@ public class EmailVerificationServiceImpl
         private final RedisRateLimitServiceImpl redisRateLimitService;
 
         private final RateLimitProperties rateLimitProperties;
+
+        private static Logger logger = LoggerFactory.getLogger(EmailVerificationServiceImpl.class);
 
         // SEND VERIFICATION EMAIL
         @Override
@@ -120,16 +122,16 @@ public class EmailVerificationServiceImpl
                 // Block request
                 if (!rateLimitResponse.isAllowed()) {
 
-                        throw new RuntimeException(
+                        throw new RateLImitException(
                                         rateLimitResponse.getMessage());
                 }
 
-                System.out.println("TOKEN RECEIVED = " + token);
+                logger.info("TOKEN RECEIVED = {}", token);
 
                 String email = redisVerificationTokenService
                                 .getEmailByToken(token);
 
-                System.out.println("EMAIL FROM REDIS = " + email);
+                logger.info("EMAIL FROM REDIS = {}", email);
 
                 if (email == null) {
 
@@ -161,9 +163,8 @@ public class EmailVerificationServiceImpl
                 redisVerificationTokenService
                                 .deleteToken(token);
 
-                System.out.println(
-                                "EMAIL VERIFIED SUCCESSFULLY = "
-                                                + email);
+                logger.info(
+                                "EMAIL VERIFIED SUCCESSFULLY = {}", email);
         }
 
         // RESEND VERIFICATION EMAIL
@@ -191,7 +192,7 @@ public class EmailVerificationServiceImpl
                 // Block request
                 if (!rateLimitResponse.isAllowed()) {
 
-                        throw new RuntimeException(
+                        throw new RateLImitException(
                                         rateLimitResponse.getMessage());
                 }
                 email = email
