@@ -14,14 +14,11 @@ import com.trackai.backend.repository.UserRepository;
 import com.trackai.backend.repository.WalletRepository;
 import com.trackai.backend.repository.WalletTransactionRepository;
 import com.trackai.backend.service.WalletService;
-
 import lombok.RequiredArgsConstructor;
-
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
-
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -60,9 +57,7 @@ public class WalletServiceImpl
         // Create wallet
         @Override
         public void createWallet(String userId) {
-                // Wallet already exists
                 if (walletRepository.findByUserId(userId).isPresent()) {
-
                         throw new WalletAlreadyExistsException(
                                         "Wallet already exists");
                 }
@@ -92,7 +87,7 @@ public class WalletServiceImpl
                 walletTransactionRepository.save(transaction);
         }
 
-        // Get current wallet
+        // Get current wallet (via SecurityContext — only safe on request thread)
         @Override
         public WalletResponse getCurrentWallet() {
 
@@ -108,6 +103,18 @@ public class WalletServiceImpl
                                 .usedTokens(wallet.getUsedTokens())
                                 .remainingTokens(wallet.getRemainingTokens())
                                 .build();
+        }
+
+        // ✅ NEW: Get wallet by explicit userId — SAFE to call from ANY thread
+        // (background/async/reactive), because it never touches
+        // SecurityContextHolder. Use this everywhere except plain controller-
+        // level request handlers where getCurrentWallet() is fine.
+        @Override
+        public Wallet getWalletByUserId(String userId) {
+                return walletRepository
+                                .findByUserId(userId)
+                                .orElseThrow(() -> new WalletNotFoundException(
+                                                "Wallet not found"));
         }
 
         // Add tokens
@@ -160,7 +167,6 @@ public class WalletServiceImpl
                                                 "Wallet not found"));
 
                 if (wallet.getRemainingTokens() < amount) {
-
                         throw new InsufficientTokensException(
                                         "Insufficient tokens");
                 }
@@ -227,23 +233,13 @@ public class WalletServiceImpl
                 User user = getAuthenticatedUser();
 
                 boolean available = hasEnoughTokens(
-
                                 user.getId(),
-
-                                imageTokens
-
-                );
+                                imageTokens);
 
                 if (!available) {
-
                         throw new InsufficientTokensException(
-
-                                        "Insufficient tokens"
-
-                        );
-
+                                        "Insufficient tokens");
                 }
-
         }
 
         @Override
@@ -252,17 +248,10 @@ public class WalletServiceImpl
                 User user = getAuthenticatedUser();
 
                 consumeTokens(
-
                                 user.getId(),
-
                                 amount,
-
                                 FeatureType.IMAGE,
-
-                                "AI Image Generation"
-
-                );
-
+                                "AI Image Generation");
         }
 
         @Override
@@ -271,16 +260,9 @@ public class WalletServiceImpl
                 User user = getAuthenticatedUser();
 
                 addTokens(
-
                                 user.getId(),
-
                                 amount,
-
                                 FeatureType.IMAGE,
-
-                                "Refund Image Tokens"
-
-                );
-
+                                "Refund Image Tokens");
         }
 }

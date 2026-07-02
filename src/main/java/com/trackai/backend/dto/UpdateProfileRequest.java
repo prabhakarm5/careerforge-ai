@@ -15,31 +15,30 @@ import org.springframework.web.multipart.MultipartFile;
 @Builder
 public class UpdateProfileRequest {
 
-    @NotBlank(message = "Name is required")
-    @Size(
+        @Size(
 
-            min = 3,
+                        min = 3,
 
-            max = 50,
+                        max = 50,
 
-            message = "Name must be between 3 and 50 characters")
-    private String name;
+                        message = "Name must be between 3 and 50 characters")
+        private String name;
 
-    @Size(
+        @Size(
 
-            max = 500,
+                        max = 500,
 
-            message = "Description cannot exceed 500 characters")
-    private String description;
+                        message = "Description cannot exceed 500 characters")
+        private String description;
 
-    // RESTRICTED FIELDS
-    private String email;
+        // RESTRICTED FIELDS
+        private String email;
 
-    private String mobileNumber;
+        private String mobileNumber;
 
-    private String password;
+        private String password;
 
-    // PROFILE IMAGE
-    @ValidImage
-    private MultipartFile profileImage;
+        // PROFILE IMAGE
+        @ValidImage
+        private MultipartFile profileImage;
 }

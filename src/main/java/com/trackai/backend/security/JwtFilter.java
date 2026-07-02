@@ -24,11 +24,8 @@ public class JwtFilter extends OncePerRequestFilter {
         private final JwtUtil jwtUtil;
         private final CustomUserDetailsService userDetailsService;
 
-        // ✅ FIX #1 — System.out.println hata, proper logger use karo
         private static final Logger log = LoggerFactory.getLogger(JwtFilter.class);
 
-        // ✅ FIX #2 — shouldNotFilter use karo (tera original approach sahi tha)
-        // Public paths yahan — doFilterInternal mein path check ki zaroorat nahi
         @Override
         protected boolean shouldNotFilter(HttpServletRequest request) {
                 String path = request.getServletPath();
@@ -44,6 +41,22 @@ public class JwtFilter extends OncePerRequestFilter {
                                 || path.startsWith("/api/plans");
         }
 
+        // ✅ NEW FIX — SSE (SseEmitter) responses trigger an ASYNC DISPATCH when
+        // emitter.complete()/completeWithError() is called. Spring's
+        // OncePerRequestFilter, by default, SKIPS running the filter chain
+        // again on that async redispatch (shouldNotFilterAsyncDispatch()
+        // returns true by default). That meant JwtFilter never re-ran on the
+        // redispatch, SecurityContext ended up empty, and AuthorizationFilter
+        // threw AccessDeniedException AFTER the SSE response was already
+        // committed — the exact "Unable to handle the Spring Security
+        // Exception because the response is already committed" crash seen in
+        // the logs. Returning false here forces this filter to run on async
+        // dispatch too, so auth stays valid for the whole SSE lifecycle.
+        @Override
+        protected boolean shouldNotFilterAsyncDispatch() {
+                return false;
+        }
+
         @Override
         protected void doFilterInternal(
                         HttpServletRequest request,
@@ -51,26 +64,17 @@ public class JwtFilter extends OncePerRequestFilter {
                         FilterChain filterChain)
                         throws ServletException, IOException {
 
-                // GET AUTH HEADER
                 final String authHeader = request.getHeader("Authorization");
 
-                // NO TOKEN — pass through, Spring Security handle karega
                 if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-                        // ✅ FIX #3 — Token/header log nahi karo (security risk tha)
-                        // Sirf path log karo debug ke liye
                         log.debug("No Bearer token for path: {}", request.getRequestURI());
                         filterChain.doFilter(request, response);
                         return;
                 }
 
                 try {
-                        // EXTRACT TOKEN
                         final String token = authHeader.substring(7);
 
-                        // ✅ FIX #4 — Token kabhi log mat karo — ye sabse bada risk tha
-                        // logger.info("TOKEN = {}", token); ← YE BILKUL MAT KARO
-
-                        // CHECK TOKEN TYPE — sirf ACCESS token allow karo
                         String tokenType = jwtUtil.extractTokenType(token);
                         if (tokenType == null || !tokenType.equals("ACCESS")) {
                                 log.warn("Invalid token type: {} for path: {}", tokenType, request.getRequestURI());
@@ -78,16 +82,13 @@ public class JwtFilter extends OncePerRequestFilter {
                                 return;
                         }
 
-                        // EXTRACT EMAIL
                         String email = jwtUtil.extractEmail(token);
 
-                        // SET AUTHENTICATION — sirf agar already set nahi hai
                         if (email != null
                                         && SecurityContextHolder.getContext().getAuthentication() == null) {
 
                                 UserDetails userDetails = userDetailsService.loadUserByUsername(email);
 
-                                // ✅ FIX #5 — validateToken sirf ek baar (tera code mein duplicate tha)
                                 if (jwtUtil.validateToken(token, userDetails.getUsername())) {
 
                                         UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
@@ -100,24 +101,20 @@ public class JwtFilter extends OncePerRequestFilter {
 
                                         SecurityContextHolder.getContext().setAuthentication(authToken);
 
-                                        // ✅ Sensitive info log nahi — sirf email log karo DEBUG level pe
                                         log.debug("Auth set for user: {}", email);
                                 }
                         }
 
                 } catch (Exception e) {
-                        // ✅ FIX #6 — Exception message log karo, token nahi
                         log.warn("JWT validation failed for path: {} — {}",
                                         request.getRequestURI(), e.getMessage());
                         sendUnauthorized(response, "Invalid or expired token");
                         return;
                 }
 
-                // CONTINUE CHAIN
                 filterChain.doFilter(request, response);
         }
 
-        // ✅ Clean helper method — consistent error response
         private void sendUnauthorized(HttpServletResponse response, String message)
                         throws IOException {
                 response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

@@ -8,7 +8,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
 import java.time.Duration;
+import java.util.Base64;
 
 @Service
 @RequiredArgsConstructor
@@ -16,10 +18,12 @@ public class RedisForgotPasswordOtpServiceImpl
                 implements RedisForgotPasswordOtpService {
 
         private static final String OTP_PREFIX = "forgot_password_otp:";
-
-        private static final String VERIFIED_PREFIX = "forgot_password_verified:";
-
         private static final String RESEND_PREFIX = "forgot_password_resend:";
+
+        // token -> email (NOT email -> flag, so it can't be guessed/forged from email)
+        private static final String RESET_TOKEN_PREFIX = "forgot_password_reset_token:";
+
+        private static final SecureRandom secureRandom = new SecureRandom();
 
         private final StringRedisTemplate redisTemplate;
 
@@ -29,132 +33,87 @@ public class RedisForgotPasswordOtpServiceImpl
         @Value("${app.forgot-password.resend-wait-minutes}")
         private long forgotPasswordResendWaitMinutes;
 
-        // Normalize email
-        private String normalizeEmail(String email) {
+        // How long the one-time reset token stays valid after OTP verification
+        private static final long RESET_TOKEN_TTL_MINUTES = 5;
 
+        private String normalizeEmail(String email) {
                 return email.trim().toLowerCase();
         }
 
         // Save OTP
         @Override
-        public void saveOtp(
-                        String email,
-                        String otp) {
-
+        public void saveOtp(String email, String otp) {
                 email = normalizeEmail(email);
-
                 redisTemplate.opsForValue().set(
                                 OTP_PREFIX + email,
                                 otp,
-                                Duration.ofMinutes(
-                                                forgotPasswordOtpExpiryMinutes));
+                                Duration.ofMinutes(forgotPasswordOtpExpiryMinutes));
         }
 
         // Get OTP
         @Override
         public String getOtp(String email) {
-
                 email = normalizeEmail(email);
-
-                return redisTemplate.opsForValue()
-                                .get(OTP_PREFIX + email);
+                return redisTemplate.opsForValue().get(OTP_PREFIX + email);
         }
 
         // Delete OTP
         @Override
         public void deleteOtp(String email) {
-
                 email = normalizeEmail(email);
-
-                redisTemplate.delete(
-                                OTP_PREFIX + email);
-        }
-
-        // Save verified state
-        @Override
-        public void saveVerifiedState(String email) {
-
-                email = normalizeEmail(email);
-
-                redisTemplate.opsForValue().set(
-                                VERIFIED_PREFIX + email,
-                                "VERIFIED",
-                                Duration.ofMinutes(5));
-        }
-
-        // Check verified state
-        @Override
-        public boolean isOtpVerified(String email) {
-
-                email = normalizeEmail(email);
-
-                return Boolean.TRUE.equals(
-                                redisTemplate.hasKey(
-                                                VERIFIED_PREFIX + email));
-        }
-
-        // Delete verified state
-        @Override
-        public void deleteVerifiedState(String email) {
-
-                email = normalizeEmail(email);
-
-                redisTemplate.delete(
-                                VERIFIED_PREFIX + email);
+                redisTemplate.delete(OTP_PREFIX + email);
         }
 
         // Save resend cooldown
         @Override
         public void saveResendCooldown(String email) {
-
                 email = normalizeEmail(email);
-
                 redisTemplate.opsForValue().set(
                                 RESEND_PREFIX + email,
                                 "LOCKED",
-                                Duration.ofMinutes(
-                                                forgotPasswordResendWaitMinutes));
+                                Duration.ofMinutes(forgotPasswordResendWaitMinutes));
         }
 
         // Check resend cooldown
         @Override
         public boolean hasResendCooldown(String email) {
+                email = normalizeEmail(email);
+                return Boolean.TRUE.equals(redisTemplate.hasKey(RESEND_PREFIX + email));
+        }
 
+        // ── Reset token ──────────────────────────────────────────────────
+
+        @Override
+        public String issueResetToken(String email) {
                 email = normalizeEmail(email);
 
-                return Boolean.TRUE.equals(
-                                redisTemplate.hasKey(
-                                                RESEND_PREFIX + email));
+                byte[] randomBytes = new byte[32]; // 256-bit, unguessable
+                secureRandom.nextBytes(randomBytes);
+                String token = Base64.getUrlEncoder()
+                                .withoutPadding()
+                                .encodeToString(randomBytes);
+
+                redisTemplate.opsForValue().set(
+                                RESET_TOKEN_PREFIX + token,
+                                email,
+                                Duration.ofMinutes(RESET_TOKEN_TTL_MINUTES));
+
+                return token;
         }
 
         @Override
-        public void markOtpVerified(
-                        String email) {
-
-                email = normalizeEmail(email);
-
-                redisTemplate.opsForValue()
-
-                                .set(
-
-                                                VERIFIED_PREFIX + email,
-
-                                                "true",
-
-                                                Duration.ofMinutes(10)
-
-                                );
+        public String resolveResetToken(String token) {
+                if (token == null || token.isBlank()) {
+                        return null;
+                }
+                return redisTemplate.opsForValue().get(RESET_TOKEN_PREFIX + token);
         }
 
         @Override
-        public void deleteVerifiedFlag(
-                        String email) {
-
-                email = normalizeEmail(email);
-                redisTemplate.delete(
-
-                                VERIFIED_PREFIX + email
-
-                );
+        public void deleteResetToken(String token) {
+                if (token == null || token.isBlank()) {
+                        return;
+                }
+                redisTemplate.delete(RESET_TOKEN_PREFIX + token);
         }
 }

@@ -1,16 +1,14 @@
 package com.trackai.backend.controller;
 
+import com.trackai.backend.config.OpenRouterProperties;
 import com.trackai.backend.dto.image.GenerateImageRequest;
 import com.trackai.backend.dto.image.GenerateImageResponse;
 import com.trackai.backend.dto.image.ImageHistoryResponse;
 import com.trackai.backend.service.ImageGenerationService;
-
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-
 import java.util.List;
 import java.util.Map;
-
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,18 +18,31 @@ import org.springframework.web.bind.annotation.*;
 public class ImageGenerationController {
 
     private final ImageGenerationService imageGenerationService;
+    private final OpenRouterProperties openRouterProperties;
 
-    @PostMapping("/generate")
-    public ResponseEntity<GenerateImageResponse> generate(
+    /*
+     * OLD CODE:
+     *
+     * @PostMapping(value = "/generate", consumes = "multipart/form-data")
+     * public ResponseEntity<GenerateImageResponse> generate(
+     *         @Valid @ModelAttribute GenerateImageRequest request) {
+     *
+     *     return ResponseEntity.ok(imageGenerationService.generateImage(request));
+     * }
+     */
 
+    @PostMapping(value = "/generate", consumes = "multipart/form-data")
+    public ResponseEntity<GenerateImageResponse> generateMultipart(
+            @Valid @ModelAttribute GenerateImageRequest request) {
+
+        return ResponseEntity.ok(imageGenerationService.generateImage(request));
+    }
+
+    @PostMapping(value = "/generate", consumes = "application/json")
+    public ResponseEntity<GenerateImageResponse> generateJson(
             @Valid @RequestBody GenerateImageRequest request) {
 
-        return ResponseEntity.ok(
-
-                imageGenerationService.generateImage(request)
-
-        );
-
+        return ResponseEntity.ok(imageGenerationService.generateImage(request));
     }
 
     @GetMapping("/history")
@@ -42,6 +53,11 @@ public class ImageGenerationController {
                 imageGenerationService
                         .getHistory());
 
+    }
+
+    @GetMapping("/models")
+    public ResponseEntity<List<OpenRouterProperties.ModelInfo>> models() {
+        return ResponseEntity.ok(openRouterProperties.getImageModels());
     }
 
     @GetMapping("/{id}/download")

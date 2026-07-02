@@ -3,8 +3,6 @@ package com.trackai.backend.controller;
 import com.trackai.backend.dto.LoginRequest;
 import com.trackai.backend.dto.LoginResponse;
 import com.trackai.backend.dto.MessageResponse;
-import com.trackai.backend.dto.RefreshTokenRequest;
-import com.trackai.backend.dto.RefreshTokenResponse;
 import com.trackai.backend.dto.RegisterRequest;
 import com.trackai.backend.dto.ResendVerificationRequest;
 import com.trackai.backend.service.AuthService;

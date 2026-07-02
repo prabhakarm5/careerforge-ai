@@ -12,7 +12,10 @@ public interface ChatMessageRepository
         List<ChatMessage> findByConversationIdOrderByCreatedAtAsc(
                         String conversationId);
 
-        List<ChatMessage> findTop20ByConversationIdOrderByCreatedAtAsc(
+        List<ChatMessage> findTop20ByConversationIdOrderByCreatedAtDesc(
+                        String conversationId);
+
+        List<ChatMessage> findTop10ByConversationIdOrderByCreatedAtDesc(
                         String conversationId);
 
         List<ChatMessage> findTop10ByConversationIdOrderByCreatedAtAsc(String conversationId);

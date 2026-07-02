@@ -7,28 +7,20 @@ import com.trackai.backend.dto.groq.GroqMessage;
 import java.util.List;
 import java.util.function.Consumer;
 
-public interface GroqService {
+public interface OpenRouterChatService {
 
     ChatResponse generateResponse(List<GroqMessage> messages, String modelId);
 
-    String generateTitle(String prompt);
-
-    /**
-     * @param modelId     Groq model id to use (falls back to default if
-     *                    blank/unknown)
-     * @param imageBase64 optional data-URL or raw base64 image (only honoured if
-     *                    the
-     *                    resolved model supports vision — ignored otherwise)
-     */
     void streamResponse(
             List<GroqMessage> messages,
             String modelId,
-            String imageBase64,
             Consumer<String> onChunk,
             Runnable onComplete,
             Consumer<Throwable> onError);
 
-    List<GroqModelConfig.ModelInfo> getAvailableModels();
+    String getDefaultModel();
 
-    GroqModelConfig.ModelInfo getDefaultModel();
+    boolean supportsModel(String modelId);
+
+    List<GroqModelConfig.ModelInfo> getAvailableModels();
 }

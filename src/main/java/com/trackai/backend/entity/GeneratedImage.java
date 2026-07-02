@@ -18,20 +18,23 @@ public class GeneratedImage {
     @GeneratedValue(strategy = GenerationType.UUID)
     private String id;
 
-    @Column(nullable = false, length = 3000)
+    @Column(nullable = false, length = 4000)
     private String prompt;
 
-    @Column(length = 3000)
-    private String negativePrompt;
-
-    @Column(nullable = false)
-    private String model;
-
-    @Column(nullable = false)
-    private String aspectRatio;
-
-    @Column(nullable = false, length = 3000)
+    // Original provider URL
+    @Column(nullable = false, length = 4000)
     private String imageUrl;
+
+    // Cloudinary URL
+    @Column(nullable = false, length = 4000)
+    private String storageUrl;
+
+    private String providerImageId;
+
+    private String cloudinaryPublicId;
+
+    @Column(nullable = false)
+    private String provider;
 
     @Column(nullable = false)
     private Long tokensUsed;
@@ -39,39 +42,20 @@ public class GeneratedImage {
     @Column(nullable = false)
     private String status;
 
+    @Builder.Default
+    private Boolean favorite = false;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
     private User user;
 
     private LocalDateTime createdAt;
 
-    private Integer width;
-
-    private Integer height;
-
-    private String mimeType;
-
-    private Long imageSize;
-
-    @Builder.Default
-    private Boolean favorite = false;
-
-    private String provider;
-
-    private String providerImageId;
-
-    private String storageUrl;
-
-    @Column
-    private String cloudinaryPublicId;
-
-    private String format;
-
-    private Long bytes;
-
     @PrePersist
     public void prePersist() {
+
         createdAt = LocalDateTime.now();
+
     }
 
 }

@@ -66,11 +66,6 @@ public class SecurityConfig {
                                 .cors(cors -> {
                                 })
 
-                                .sessionManagement(session ->
-
-                                session.sessionCreationPolicy(
-                                                SessionCreationPolicy.STATELESS))
-
                                 // STATELESS SESSION
                                 .sessionManagement(session ->
 
@@ -128,14 +123,18 @@ public class SecurityConfig {
                                                                 "/api/admin/plans/**")
 
                                                 .hasRole("ADMIN")
-                                                // PAYMENT APIs
+                                                // Common api for payment,wallet,images
                                                 .requestMatchers(
-                                                                "/api/payment/**",
-                                                                "/api/wallet/**")
 
-                                                .hasAnyRole(
-                                                                "USER",
-                                                                "ADMIN")
+                                                                "/api/payment/**",
+
+                                                                "/api/wallet/**",
+
+                                                                "/api/images/**")
+
+                                                .hasAnyRole("USER", "ADMIN"
+
+                                                )
 
                                                 // USER APIs
                                                 .requestMatchers(

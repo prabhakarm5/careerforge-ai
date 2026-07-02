@@ -11,19 +11,13 @@ public class GenerateImageResponse {
 
     private String imageUrl;
 
+    private byte[] imageBytes;
+
     private String storageUrl;
 
     private String providerImageId;
 
-    private String revisedPrompt;
-
-    private String model;
-
-    private Integer width;
-
-    private Integer height;
-
-    private String mimeType;
+    private String prompt;
 
     @Builder.Default
     private String provider = "OPENROUTER";

@@ -16,13 +16,17 @@ import com.trackai.backend.service.ImageDownloaderService;
 import com.trackai.backend.service.ImageGenerationService;
 import com.trackai.backend.service.UserService;
 import com.trackai.backend.service.WalletService;
+
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+
 import org.springframework.stereotype.Service;
+
 import java.util.List;
 import java.util.Map;
 
 @Service
+
 @RequiredArgsConstructor
 public class ImageGenerationServiceImpl
                 implements ImageGenerationService {
@@ -41,22 +45,35 @@ public class ImageGenerationServiceImpl
 
         private final TokenProperties tokenProperties;
 
-        @Transactional
         @Override
+        @Transactional
         public GenerateImageResponse generateImage(
                         GenerateImageRequest request) {
 
-                // 1. Check Wallet
+                // Wallet Check
                 walletService.checkImageGenerationTokens();
 
-                // 2. Generate Image from OpenRouter
+                // Generate from OpenRouter
                 GenerateImageResponse response = imageProvider.generateImage(request);
 
-                // 3. Download Image
-                byte[] imageBytes = imageDownloaderService.downloadImage(
-                                response.getImageUrl());
+                // URL or Base64
+                byte[] imageBytes;
 
-                // 4. Upload to Cloudinary
+                if (response.getImageBytes() != null) {
+
+                        imageBytes = response.getImageBytes();
+
+                } else {
+
+                        imageBytes = imageDownloaderService.downloadImage(
+
+                                        response.getImageUrl()
+
+                        );
+
+                }
+
+                // Upload to Cloudinary
                 CloudinaryUploadResponse upload =
 
                                 cloudinaryService.uploadGeneratedImage(
@@ -65,63 +82,74 @@ public class ImageGenerationServiceImpl
 
                                 );
 
-                // 5. Current User
+                // Current User
                 User user = userService.getCurrentUser();
 
-                // 6. Save Database
+                // Save
                 GeneratedImage image = GeneratedImage.builder()
 
                                 .prompt(request.getPrompt())
 
-                                .negativePrompt(
-                                                request.getNegativePrompt())
-
-                                .aspectRatio(
-                                                request.getAspectRatio())
-
-                                .model(
-                                                response.getModel())
-
                                 .imageUrl(
-                                                response.getImageUrl())
+
+                                                response.getImageUrl() == null
+                                                                ? upload.getSecureUrl()
+                                                                : response.getImageUrl()
+
+                                )
 
                                 .storageUrl(
-                                                upload.getSecureUrl())
 
-                                .cloudinaryPublicId(
-                                                upload.getPublicId())
+                                                upload.getSecureUrl()
 
-                                .width(
-                                                upload.getWidth())
-
-                                .height(
-                                                upload.getHeight())
-
-                                .imageSize(
-                                                upload.getBytes())
-
-                                .mimeType(
-                                                upload.getFormat())
+                                )
 
                                 .provider(
-                                                response.getProvider())
+
+                                                response.getProvider()
+
+                                )
+
+                                .providerImageId(
+
+                                                response.getProviderImageId()
+
+                                )
+
+                                .cloudinaryPublicId(
+
+                                                upload.getPublicId()
+
+                                )
+
+                                .tokensUsed(
+
+                                                tokenProperties.getImage()
+
+                                )
 
                                 .status(
-                                                ImageStatus.COMPLETED.name())
 
-                                .user(user)
+                                                ImageStatus.COMPLETED.name()
+
+                                )
 
                                 .favorite(false)
+
+                                .user(user)
 
                                 .build();
 
                 repository.save(image);
 
-                // 7. Deduct Wallet
+                // Consume Wallet
                 walletService.consumeImageTokens(
-                                tokenProperties.getImage());
 
-                // 8. Return Cloudinary URL
+                                tokenProperties.getImage()
+
+                );
+
+                // Return Response
                 response.setStorageUrl(
 
                                 upload.getSecureUrl()
@@ -129,6 +157,7 @@ public class ImageGenerationServiceImpl
                 );
 
                 return response;
+
         }
 
         @Override
@@ -150,17 +179,11 @@ public class ImageGenerationServiceImpl
 
                                                 .prompt(image.getPrompt())
 
-                                                .imageUrl(image.getStorageUrl())
+                                                .imageUrl(image.getImageUrl())
 
                                                 .storageUrl(image.getStorageUrl())
 
-                                                .aspectRatio(image.getAspectRatio())
-
-                                                .model(image.getModel())
-
-                                                .width(image.getWidth())
-
-                                                .height(image.getHeight())
+                                                .tokensUsed(image.getTokensUsed())
 
                                                 .favorite(image.getFavorite())
 
@@ -176,31 +199,24 @@ public class ImageGenerationServiceImpl
 
         @Override
         @Transactional
-        public void delete(String imageId) {
+        public void delete(
+                        String imageId) {
 
                 User user = userService.getCurrentUser();
 
                 GeneratedImage image = repository
 
                                 .findByIdAndUser(
-
                                                 imageId,
-
-                                                user
-
-                                )
+                                                user)
 
                                 .orElseThrow(() ->
 
                                 new ImageNotFoundException(
+                                                "Image not found"));
 
-                                                "Image not found"
-
-                                )
-
-                                );
-
-                if (image.getStorageUrl() != null) {
+                if (image.getCloudinaryPublicId() != null
+                                && !image.getCloudinaryPublicId().isBlank()) {
 
                         try {
 
@@ -223,117 +239,81 @@ public class ImageGenerationServiceImpl
         }
 
         @Override
-        public Map<String, String> download(
-
+        @Transactional
+        public void toggleFavorite(
                         String imageId) {
 
-                User user =
+                User user = userService.getCurrentUser();
 
-                                userService.getCurrentUser();
+                GeneratedImage image = repository
 
-                GeneratedImage image =
-
-                                repository.findByIdAndUser(
-
+                                .findByIdAndUser(
                                                 imageId,
+                                                user)
 
-                                                user
+                                .orElseThrow(() ->
 
-                                )
+                                new ImageNotFoundException(
+                                                "Image not found"));
 
-                                                .orElseThrow(
+                image.setFavorite(
 
-                                                                () -> new RuntimeException(
-
-                                                                                "Image not found"
-
-                                                                )
-
-                                                );
-
-                return Map.of(
-
-                                "downloadUrl",
-
-                                image.getStorageUrl()
+                                !Boolean.TRUE.equals(
+                                                image.getFavorite())
 
                 );
+
+                repository.save(image);
 
         }
 
         @Override
         @Transactional
         public GenerateImageResponse regenerate(
-
                         String imageId) {
 
-                User user =
+                User user = userService.getCurrentUser();
 
-                                userService.getCurrentUser();
+                GeneratedImage image = repository
 
-                GeneratedImage image =
-
-                                repository.findByIdAndUser(
-
+                                .findByIdAndUser(
                                                 imageId,
+                                                user)
 
-                                                user
+                                .orElseThrow(() ->
 
-                                )
+                                new ImageNotFoundException(
+                                                "Image not found"));
 
-                                                .orElseThrow(
-
-                                                                () -> new RuntimeException(
-
-                                                                                "Image not found"
-
-                                                                )
-
-                                                );
-
-                GenerateImageRequest request =
-
-                                new GenerateImageRequest();
+                GenerateImageRequest request = new GenerateImageRequest();
 
                 request.setPrompt(
 
-                                image.getPrompt());
+                                image.getPrompt()
 
-                request.setNegativePrompt(
-
-                                image.getNegativePrompt());
-
-                request.setAspectRatio(
-
-                                image.getAspectRatio());
-
-                request.setModel(
-
-                                image.getModel());
+                );
 
                 return generateImage(
 
-                                request);
+                                request
+
+                );
 
         }
 
         @Override
-        @Transactional
-        public void toggleFavorite(String imageId) {
+        public Map<String, String> download(String imageId) {
 
                 User user = userService.getCurrentUser();
 
-                GeneratedImage image = repository.findByIdAndUser(
-                                imageId,
-                                user)
-                                .orElseThrow(() -> new ImageNotFoundException(
-                                                "Image not found"));
+                GeneratedImage image = repository
 
-                image.setFavorite(
-                                !Boolean.TRUE.equals(
-                                                image.getFavorite()));
+                                .findByIdAndUser(imageId, user)
 
-                repository.save(image);
+                                .orElseThrow(() -> new ImageNotFoundException("Image not found"));
 
+                return Map.of(
+                                "downloadUrl",
+                                image.getStorageUrl());
         }
 }

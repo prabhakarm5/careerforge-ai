@@ -19,111 +19,58 @@ public class UserForgotPasswordController {
         // SEND OTP
         @PostMapping("/forgot-password")
         public ResponseEntity<MessageResponse> forgotPassword(
-
                         @Valid @RequestBody ForgotPasswordRequest request) {
 
-                // SEND OTP
-                forgotPasswordService
-
-                                .sendForgotPasswordOtp(
-
-                                                request.getEmail());
-
-                // RESPONSE
+                forgotPasswordService.sendForgotPasswordOtp(request.getEmail());
                 return ResponseEntity.ok(
-
                                 MessageResponse.builder()
-
-                                                .message(
-
-                                                                "Password reset OTP sent successfully")
-
-                                                .resendAvailableAt(
-
-                                                                LocalDateTime.now()
-                                                                                .plusMinutes(2))
-
+                                                .message("Password reset OTP sent successfully")
+                                                .resendAvailableAt(LocalDateTime.now().plusMinutes(2))
                                                 .build());
         }
 
-        // VERIFY OTP
+        // VERIFY OTP — returns a one-time reset token
         @PostMapping("/verify-reset-otp")
-        public ResponseEntity<MessageResponse> verifyResetOtp(
-
+        public ResponseEntity<VerifyResetOtpResponse> verifyResetOtp(
                         @Valid @RequestBody VerifyResetOtpRequest request) {
 
-                // VERIFY OTP
-                forgotPasswordService
+                String resetToken = forgotPasswordService.verifyForgotPasswordOtp(
+                                request.getEmail(),
+                                request.getOtp());
 
-                                .verifyForgotPasswordOtp(
-
-                                                request.getEmail(),
-
-                                                request.getOtp());
-
-                // RESPONSE
                 return ResponseEntity.ok(
-
-                                MessageResponse.builder()
-
-                                                .message(
-                                                                "OTP verified successfully")
-
+                                VerifyResetOtpResponse.builder()
+                                                .message("OTP verified successfully")
+                                                .resetToken(resetToken)
                                                 .build());
         }
 
-        // RESET PASSWORD
+        // RESET PASSWORD — requires resetToken, NOT email
         @PostMapping("/reset-password")
         public ResponseEntity<MessageResponse> resetPassword(
-
                         @Valid @RequestBody ResetPasswordRequest request) {
 
-                // RESET PASSWORD
-                forgotPasswordService
+                forgotPasswordService.resetPassword(
+                                request.getResetToken(),
+                                request.getNewPassword());
 
-                                .resetPassword(
-
-                                                request.getEmail(),
-
-                                                request.getNewPassword());
-
-                // RESPONSE
                 return ResponseEntity.ok(
-
                                 MessageResponse.builder()
-
-                                                .message(
-                                                                "Password reset successfully")
-
+                                                .message("Password reset successfully")
                                                 .build());
         }
 
         // RESEND OTP
         @PostMapping("/resend-reset-otp")
         public ResponseEntity<MessageResponse> resendResetOtp(
-
                         @Valid @RequestBody ResendResetOtpRequest request) {
 
-                // RESEND OTP
-                forgotPasswordService
+                forgotPasswordService.resendForgotPasswordOtp(request.getEmail());
 
-                                .resendForgotPasswordOtp(
-
-                                                request.getEmail());
-
-                // RESPONSE
                 return ResponseEntity.ok(
-
                                 MessageResponse.builder()
-
-                                                .message(
-                                                                "Password reset OTP resend successfully")
-
-                                                .resendAvailableAt(
-
-                                                                LocalDateTime.now()
-                                                                                .plusMinutes(2))
-
+                                                .message("Password reset OTP resend successfully")
+                                                .resendAvailableAt(LocalDateTime.now().plusMinutes(2))
                                                 .build());
         }
 }

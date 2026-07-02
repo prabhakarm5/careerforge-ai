@@ -19,15 +19,7 @@ public class ImageHistoryResponse {
 
     private String storageUrl;
 
-    private String aspectRatio;
-
-    private String model;
-
     private Long tokensUsed;
-
-    private Integer width;
-
-    private Integer height;
 
     private Boolean favorite;
 

@@ -2,18 +2,16 @@ package com.trackai.backend.service;
 
 public interface ForgotPasswordService {
 
-    void sendForgotPasswordOtp(
-            String email);
+        void sendForgotPasswordOtp(String email);
 
-    void verifyForgotPasswordOtp(
-            String email,
-            String otp);
+        // Now returns a one-time reset token instead of void.
+        // This token is the ONLY thing the frontend can use to reset the password.
+        String verifyForgotPasswordOtp(String email, String otp);
 
-    void resetPassword(
-            String email,
-            String newPassword);
+        // Takes resetToken instead of email — email is resolved server-side from the
+        // token.
+        void resetPassword(String resetToken, String newPassword);
 
-    void resendForgotPasswordOtp(
-            String email);
+        void resendForgotPasswordOtp(String email);
 
 }

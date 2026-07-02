@@ -132,6 +132,44 @@ public class GlobalExceptionHandler {
                                 HttpStatus.TOO_MANY_REQUESTS);
         }
 
+        @ExceptionHandler(OpenRouterException.class)
+        public ResponseEntity<ErrorResponse> handleOpenRouterException(
+                        OpenRouterException ex,
+                        HttpServletRequest request) {
+
+                String message = sanitizeOpenRouterMessage(ex.getMessage());
+
+                return new ResponseEntity<>(
+                                buildResponse(HttpStatus.BAD_GATEWAY, "AI Provider Error", message, request),
+                                HttpStatus.BAD_GATEWAY);
+        }
+
+        private String sanitizeOpenRouterMessage(String rawMessage) {
+                if (rawMessage == null || rawMessage.isBlank()) {
+                        return "The AI provider could not complete the request. Please try again.";
+                }
+
+                String lower = rawMessage.toLowerCase();
+
+                if (lower.contains("insufficient credits") || lower.contains("\"code\":402")) {
+                        return "OpenRouter does not have enough credits for this model. Please choose a free model or add credits.";
+                }
+
+                if (lower.contains("invalid") && lower.contains("api")) {
+                        return "OpenRouter API key is invalid or not active.";
+                }
+
+                if (lower.contains("model") && (lower.contains("not found") || lower.contains("not available"))) {
+                        return "The selected OpenRouter model is not available. Please choose another model.";
+                }
+
+                if (lower.contains("rate") || lower.contains("429")) {
+                        return "OpenRouter is rate-limiting this model. Please try again or choose another model.";
+                }
+
+                return "OpenRouter could not complete the request. Please try again or choose another model.";
+        }
+
         // ACCESS DENIED (Spring Security)
         @ExceptionHandler(AccessDeniedException.class)
         public ResponseEntity<ErrorResponse> handleAccessDeniedException(

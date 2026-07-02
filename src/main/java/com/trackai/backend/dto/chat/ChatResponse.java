@@ -15,6 +15,16 @@ public class ChatResponse {
 
     private String response;
 
+    private String provider;
+
+    private String model;
+
+    private Boolean downloadable;
+
+    private String suggestedFileName;
+
+    private String contentType;
+
     private Integer promptTokens;
 
     private Integer completionTokens;

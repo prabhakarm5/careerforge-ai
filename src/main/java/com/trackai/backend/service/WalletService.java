@@ -2,6 +2,7 @@ package com.trackai.backend.service;
 
 import com.trackai.backend.dto.WalletResponse;
 import com.trackai.backend.dto.WalletTransactionResponse;
+import com.trackai.backend.entity.Wallet;
 import com.trackai.backend.enums.FeatureType;
 
 import java.util.List;
@@ -43,4 +44,7 @@ public interface WalletService {
         void consumeImageTokens(Long amount);
 
         void refundImageTokens(Long amount);
+
+        // for getWalletByUserId
+        Wallet getWalletByUserId(String userId);
 }
