@@ -18,15 +18,35 @@ public class GeneratedImage {
     @GeneratedValue(strategy = GenerationType.UUID)
     private String id;
 
-    @Column(nullable = false, length = 4000)
+    /*
+     * ==========================================================
+     * PostgreSQL (ACTIVE)
+     * ==========================================================
+     * TEXT stores very large strings.
+     * Also works perfectly in MySQL.
+     */
+    @Lob
+    @Column(columnDefinition = "TEXT", nullable = false)
     private String prompt;
 
-    // Original provider URL
-    @Column(nullable = false, length = 4000)
+    /*
+     * ==========================================================
+     * PostgreSQL (ACTIVE)
+     * ==========================================================
+     * Original provider image URL.
+     */
+    @Lob
+    @Column(columnDefinition = "TEXT", nullable = false)
     private String imageUrl;
 
-    // Cloudinary URL
-    @Column(nullable = false, length = 4000)
+    /*
+     * ==========================================================
+     * PostgreSQL (ACTIVE)
+     * ==========================================================
+     * Cloudinary image URL.
+     */
+    // @Lob
+    @Column(columnDefinition = "TEXT", nullable = false)
     private String storageUrl;
 
     private String providerImageId;
@@ -53,9 +73,23 @@ public class GeneratedImage {
 
     @PrePersist
     public void prePersist() {
-
         createdAt = LocalDateTime.now();
-
     }
 
+    /*
+     * ==========================================================
+     * MySQL (COMMENT)
+     * ==========================================================
+     * Agar MySQL use karna ho to neeche wala approach bhi use kar sakte ho.
+     * Dono databases me kaam karega.
+     *
+     * @Column(nullable = false, length = 4000)
+     * private String prompt;
+     *
+     * @Column(nullable = false, length = 4000)
+     * private String imageUrl;
+     *
+     * @Column(nullable = false, length = 4000)
+     * private String storageUrl;
+     */
 }

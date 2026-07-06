@@ -25,13 +25,48 @@ public class WalletTransaction {
     @Column(nullable = false)
     private Long amount;
 
+    /*
+     * ==========================================================
+     * PostgreSQL + MySQL (ACTIVE)
+     * ==========================================================
+     * EnumType.STRING works with both databases.
+     */
     @Enumerated(EnumType.STRING)
     private TransactionType transactionType;
 
     @Enumerated(EnumType.STRING)
     private FeatureType featureType;
 
+    /*
+     * ==========================================================
+     * PostgreSQL + MySQL (ACTIVE)
+     * ==========================================================
+     * VARCHAR is sufficient for transaction descriptions.
+     * If in future descriptions become very large,
+     * use @Lob + TEXT.
+     */
+    @Column(length = 500)
     private String description;
 
-    private LocalDateTime createdAt;
+    /*
+     * ==========================================================
+     * PostgreSQL Alternative (Optional)
+     * ==========================================================
+     * Uncomment if large descriptions are expected.
+     */
+
+    // @Lob
+    // @Column(columnDefinition = "TEXT")
+    // private String description;
+
+    @Builder.Default
+    private LocalDateTime createdAt = LocalDateTime.now();
+
+    /*
+     * ==========================================================
+     * MySQL (NOTE)
+     * ==========================================================
+     * No database-specific changes required.
+     * This entity is fully compatible with PostgreSQL and MySQL.
+     */
 }

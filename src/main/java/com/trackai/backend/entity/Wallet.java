@@ -29,7 +29,48 @@ public class Wallet {
     @Column(nullable = false)
     private Long remainingTokens;
 
-    private LocalDateTime createdAt;
+    /*
+     * ==========================================================
+     * NEW: tracks which plan the user currently has active.
+     * Nullable on purpose — a brand-new wallet (welcome bonus only,
+     * no plan purchased yet) has no plan, and frontend should show
+     * "Free" in that case rather than crashing on a null field.
+     * ==========================================================
+     */
+    @Column
+    private String currentPlanId;
 
-    private LocalDateTime updatedAt;
+    @Column
+    private String currentPlanName;
+
+    /*
+     * ==========================================================
+     * PostgreSQL + MySQL (ACTIVE)
+     * ==========================================================
+     * LocalDateTime is supported by both databases.
+     * Hibernate maps it automatically.
+     */
+    @Builder.Default
+    private LocalDateTime createdAt = LocalDateTime.now();
+
+    @Builder.Default
+    private LocalDateTime updatedAt = LocalDateTime.now();
+
+    /*
+     * ==========================================================
+     * Automatically update updatedAt before UPDATE
+     * ==========================================================
+     */
+    @PreUpdate
+    public void preUpdate() {
+        updatedAt = LocalDateTime.now();
+    }
+
+    /*
+     * ==========================================================
+     * MySQL (NOTE)
+     * ==========================================================
+     * No database-specific changes required.
+     * This entity is fully compatible with PostgreSQL and MySQL.
+     */
 }

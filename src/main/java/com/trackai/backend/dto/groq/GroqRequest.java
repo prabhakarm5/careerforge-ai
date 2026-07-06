@@ -1,6 +1,7 @@
 package com.trackai.backend.dto.groq;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Setter;
@@ -24,4 +25,16 @@ public class GroqRequest {
      * generateTitle) so their behavior is unchanged.
      */
     private Boolean stream;
+
+    /**
+     * Maximum tokens Groq is allowed to generate for this response.
+     * Without this set explicitly, the provider falls back to its own
+     * default, which can be small enough to silently truncate longer
+     * answers (finish_reason: "length") well before the user expects it
+     * to stop. GroqServiceImpl now always sets this — via
+     * groqModelConfig.getMaxTokens() for normal chat, or a small fixed
+     * value (30) for title generation.
+     */
+    @JsonProperty("max_tokens")
+    private Integer maxTokens;
 }

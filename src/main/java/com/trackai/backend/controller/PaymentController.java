@@ -59,4 +59,33 @@ public class PaymentController {
 
                                 paymentService.getPaymentHistory());
         }
+
+        // WEBHOOK — Razorpay calls this server-to-server. Never trust client for final
+        // status.
+        @PostMapping("/webhook")
+        public ResponseEntity<String> handleWebhook(
+                        @RequestBody String payload,
+                        @RequestHeader("X-Razorpay-Signature") String signature) {
+
+                paymentService.handleWebhook(payload, signature);
+                return ResponseEntity.ok("Webhook processed");
+        }
+
+        // PAYMENT CANCELLED / FAILED FROM CLIENT
+        @PostMapping("/cancel")
+        public ResponseEntity<Map<String, String>> cancelPayment(
+
+                        @RequestParam String orderId,
+
+                        @RequestParam(required = false) String reason) {
+
+                paymentService.markPaymentCancelled(
+                                orderId,
+                                reason == null ? "Payment cancelled by user" : reason);
+
+                return ResponseEntity.ok(
+                                Map.of(
+                                                "message",
+                                                "Payment marked as cancelled"));
+        }
 }

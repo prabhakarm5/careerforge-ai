@@ -60,6 +60,8 @@ public class SecurityConfig {
                 http
 
                                 // DISABLE CSRF
+                                // Already disabled globally — this covers webhook too,
+                                // Razorpay's POST request doesn't carry a CSRF token anyway.
                                 .csrf(csrf -> csrf.disable())
 
                                 // ENABLE CORS
@@ -117,6 +119,27 @@ public class SecurityConfig {
 
                                                 .permitAll()
 
+                                                // ✅ NEW: RAZORPAY WEBHOOK — must stay PUBLIC.
+                                                // Razorpay calls this server-to-server, it has
+                                                // NO JWT token, so it can never satisfy
+                                                // hasAnyRole("USER","ADMIN") below.
+                                                // Security here comes from signature
+                                                // verification inside handleWebhook()
+                                                // (Utils.verifyWebhookSignature using
+                                                // RAZORPAY_WEBHOOK_SECRET) — NOT from auth.
+                                                //
+                                                // IMPORTANT: this matcher must be declared
+                                                // BEFORE the general "/api/payment/**" rule
+                                                // below. Spring Security evaluates matchers
+                                                // top-to-bottom and uses the FIRST match —
+                                                // if this line were after "/api/payment/**",
+                                                // it would never be reached and webhook
+                                                // calls would get blocked with 401/403.
+                                                .requestMatchers(
+                                                                "/api/payment/webhook")
+
+                                                .permitAll()
+
                                                 // ADMIN APIs
                                                 .requestMatchers(
                                                                 "/api/admin/**",
@@ -124,6 +147,9 @@ public class SecurityConfig {
 
                                                 .hasRole("ADMIN")
                                                 // Common api for payment,wallet,images
+                                                // NOTE: /api/payment/webhook is already
+                                                // carved out above, so it's unaffected by
+                                                // this role restriction.
                                                 .requestMatchers(
 
                                                                 "/api/payment/**",

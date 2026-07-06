@@ -1,22 +1,17 @@
 package com.trackai.backend.entity;
 
 import com.trackai.backend.enums.FeatureType;
-
 import jakarta.persistence.*;
-
 import lombok.*;
 
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "conversations")
-
 @Getter
 @Setter
-
 @NoArgsConstructor
 @AllArgsConstructor
-
 @Builder
 public class Conversation {
 
@@ -29,6 +24,13 @@ public class Conversation {
     @Column(nullable = false)
     private String title;
 
+    /*
+     * ==========================================================
+     * PostgreSQL + MySQL (ACTIVE)
+     * ==========================================================
+     * EnumType.STRING works perfectly with both PostgreSQL and MySQL.
+     * No database-specific changes required.
+     */
     @Enumerated(EnumType.STRING)
     private FeatureType featureType;
 
@@ -42,6 +44,14 @@ public class Conversation {
     private LocalDateTime updatedAt;
 
     @Column(nullable = false)
+    @Builder.Default
     private Boolean pinned = false;
 
+    /*
+     * ==========================================================
+     * MySQL (NOTE)
+     * ==========================================================
+     * No changes required for MySQL.
+     * This entity is fully compatible with both databases.
+     */
 }

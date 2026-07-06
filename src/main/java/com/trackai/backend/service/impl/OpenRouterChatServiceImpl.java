@@ -49,22 +49,60 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
             Never say you are a specific underlying model. You are CareerForge AI.
             """;
 
-    // ── Retry tuning ─────────────────────────────────────────────────────
-    // Sirf genuine transient network errors par retry karte hain (connection
-    // reset, dead pooled connection). 4xx/5xx application errors (balance,
-    // rate limit, bad request) par KABHI retry nahi karte — wo real errors
-    // hain, retry se sirf response slow hoga, fix nahi hoga.
     private static final int MAX_RETRIES = 2;
     private static final Duration RETRY_BACKOFF = Duration.ofSeconds(1);
 
+    // Dynamic max_tokens sizing: chhota input -> chhota request, bada input ->
+    // zyada room, hamesha ABSOLUTE_MAX_TOKENS aur model ke context window ke
+    // andar.
+    private static final int ABSOLUTE_MAX_TOKENS = 8192;
+    private static final int MIN_TOKENS = 1024;
+
+    // Conservative default jab model ka apna context-window config me na mile.
+    private static final int DEFAULT_ASSUMED_CONTEXT_WINDOW = 16000;
+
+    // Chars-to-tokens rough-but-safe estimate.
+    private static final int CHARS_PER_TOKEN_ESTIMATE = 4;
+
+    // FIX (bhai's ask: "agar answer token se zyada ka hai to short mein
+    // answer de"): agar computed budget (dynamicMaxTokens) already tight
+    // hai — matlab lambi conversation history ya lamba input hone ki wajah
+    // se model ke paas likhne ke liye zyada room nahi bacha — hum model ko
+    // ek EXTRA system instruction ke through PROACTIVELY bata dete hain ki
+    // chhota, seedha jawaab do, bajaye is ke ki wo apna "normal detailed"
+    // jawaab likhna shuru kare aur beech mein max_tokens hit karke truncate
+    // ho jaaye. Threshold ABSOLUTE_MAX_TOKENS ka ek-chauthai (2048) rakha
+    // hai — isse kam room bacha ho to "tight" maana jaata hai.
+    private static final int CONCISE_MODE_THRESHOLD_TOKENS = ABSOLUTE_MAX_TOKENS / 4;
+
+    private static final String CONCISE_MODE_INSTRUCTION_TEMPLATE = "IMPORTANT (overrides the detailed-answer "
+            + "preference above): the response budget for this reply is limited to about %d tokens right now. "
+            + "Give a noticeably SHORTER, more concise answer than you normally would — cover only the most "
+            + "important points, skip extra examples or repetition, and do not pad the answer. If real detail "
+            + "must be cut, say so briefly at the end and invite the user to ask a follow-up (or type "
+            + "\"continue\") for more.";
+
+    // Truncation par model-hop nahi karte — ek chhota polite note chipka ke
+    // turant, cleanly stream complete kar dete hain. (Ab CONCISE_MODE se
+    // zyada rare hoga, kyunki model ko pehle hi bata diya jaata hai budget
+    // tight hai — ye sirf tab trigger hoga jab model instruction ke bawajood
+    // bhi limit se zyada likhne ki koshish kare.)
+    private static final String TRUNCATION_NOTE = "\n\n---\n"
+            + "_⚠️ Yeh jawaab bahut lamba tha isliye poora ek saath nahi de paaya — "
+            + "itna bada code/answer ek single response mein possible nahi hai. "
+            + "Agla part chahiye to bas **\"continue\"** likh dijiye._";
+
     @Override
     public ChatResponse generateResponse(List<GroqMessage> messages, String modelId) {
+
+        String resolvedModelId = resolveModel(modelId);
+        int dynamicMaxTokens = computeDynamicMaxTokens(messages, resolvedModelId);
 
         GroqResponse body = openRouterWebClient
                 .post()
                 .uri(properties.getChatEndpoint())
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(buildRequestBody(messages, resolveModel(modelId), false))
+                .bodyValue(buildRequestBody(messages, resolvedModelId, false, dynamicMaxTokens))
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, this::mapErrorResponse)
                 .bodyToMono(GroqResponse.class)
@@ -88,7 +126,7 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
         return ChatResponse.builder()
                 .response(body.getChoices().get(0).getMessage().getContent())
                 .provider("OPENROUTER")
-                .model(resolveModel(modelId))
+                .model(resolvedModelId)
                 .downloadable(looksLikeCodeOrDocument(body.getChoices().get(0).getMessage().getContent()))
                 .suggestedFileName(suggestFileName(body.getChoices().get(0).getMessage().getContent()))
                 .contentType("text/markdown")
@@ -106,16 +144,19 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
             Runnable onComplete,
             Consumer<Throwable> onError) {
 
-        // ✅ Jab tak stream se ek bhi line nahi aayi, tab tak retry karna safe
-        // hai. Ek baar chunk aana shuru ho gaya, uske baad retry nahi karte —
-        // warna user ko wahi text dobara mil jayega (duplicate answer).
         AtomicBoolean streamStarted = new AtomicBoolean(false);
+        AtomicBoolean truncated = new AtomicBoolean(false);
+
+        String resolvedModelId = resolveModel(modelId);
+        int dynamicMaxTokens = computeDynamicMaxTokens(messages, resolvedModelId);
+
+        log.info("OpenRouter stream request — model={}, dynamicMaxTokens={}", resolvedModelId, dynamicMaxTokens);
 
         openRouterWebClient
                 .post()
                 .uri(properties.getChatEndpoint())
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(buildRequestBody(messages, resolveModel(modelId), true))
+                .bodyValue(buildRequestBody(messages, resolvedModelId, true, dynamicMaxTokens))
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, this::mapErrorResponse)
                 .bodyToFlux(String.class)
@@ -134,10 +175,20 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
                 .subscribe(
                         rawLine -> {
                             streamStarted.set(true);
-                            handleLine(rawLine, onChunk);
+                            if (handleLine(rawLine, onChunk)) {
+                                truncated.set(true);
+                            }
                         },
                         onError,
-                        onComplete);
+                        () -> {
+                            if (truncated.get()) {
+                                log.warn(
+                                        "OpenRouter stream truncated at max_tokens (model={}) — finishing gracefully with note",
+                                        modelId);
+                                onChunk.accept(TRUNCATION_NOTE);
+                            }
+                            onComplete.run();
+                        });
     }
 
     @Override
@@ -162,15 +213,162 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
             model.setVision(item.isVision());
             model.setProvider("OPENROUTER");
             model.setType("chat");
+            model.setContextLength(item.getContextLength());
             models.add(model);
         }
 
         return models;
     }
 
-    private Map<String, Object> buildRequestBody(List<GroqMessage> messages, String modelId, boolean stream) {
+    // ===================== SMART FALLBACK SELECTION =====================
+
+    // FIX (bhai's ask: "model choose kr ke fallback"): pehle
+    // ChatServiceImpl.getOpenRouterFallbackModel() bas "list me se pehla
+    // model jo current wala nahi hai" utha leta tha — bina ye check kiye ki
+    // wo model current conversation ko context-wise handle bhi kar payega
+    // ya nahi. Isse aisa ho sakta tha ki hum ek chhote-context wale model
+    // par hop karein jabki conversation already bada hai — wo model turant
+    // context-overflow se fail ho jaata, aur fallback chain bewajah lambi
+    // ho jaati.
+    //
+    // Ab: current conversation ka estimated size dekh kar, sirf un models
+    // me se choose karte hain jinka context window is conversation ko
+    // (+ ek MIN_TOKENS jitna likhne ka room) comfortably fit kar sake. Agar
+    // multiple qualify karein, sabse bada context-window wala lete hain
+    // (safest bet). Agar koi bhi qualify na kare (conversation itni badi hai
+    // ki koi bhi configured model usse fit nahi kar sakta), tab bhi best-
+    // effort ke roop me sabse bade context-window wale model par jaate hain
+    // — bilkul refuse karne se behtar hai try karna.
+    //
+    // NOTE: Isko use karne ke liye OpenRouterChatService interface me ye
+    // method signature add karna zaroori hai:
+    // String pickFallbackModel(List<GroqMessage> messages, String excludeModelId);
+    @Override
+    public String pickFallbackModel(List<GroqMessage> messages, String excludeModelId) {
+        List<OpenRouterProperties.ModelInfo> candidates = properties.getChatModels();
+        if (candidates == null || candidates.isEmpty()) {
+            return excludeModelId;
+        }
+
+        int estimatedInputTokens = estimateConversationTokens(messages);
+        int roomNeeded = estimatedInputTokens + MIN_TOKENS;
+
+        OpenRouterProperties.ModelInfo bestFit = null;
+        OpenRouterProperties.ModelInfo largestOverall = null;
+
+        for (OpenRouterProperties.ModelInfo candidate : candidates) {
+            if (candidate.getId() == null || candidate.getId().equals(excludeModelId)) {
+                continue;
+            }
+
+            if (largestOverall == null || candidate.getContextLength() > largestOverall.getContextLength()) {
+                largestOverall = candidate;
+            }
+
+            if (candidate.getContextLength() >= roomNeeded
+                    && (bestFit == null || candidate.getContextLength() > bestFit.getContextLength())) {
+                bestFit = candidate;
+            }
+        }
+
+        if (bestFit != null) {
+            log.info("Fallback model chosen (context-fit): {} (contextLength={}, needed>={})",
+                    bestFit.getId(), bestFit.getContextLength(), roomNeeded);
+            return bestFit.getId();
+        }
+        if (largestOverall != null) {
+            log.warn("No fallback model comfortably fits this conversation (needed>={} tokens); "
+                    + "using largest available anyway: {} (contextLength={})",
+                    roomNeeded, largestOverall.getId(), largestOverall.getContextLength());
+            return largestOverall.getId();
+        }
+        return excludeModelId;
+    }
+
+    // ===================== DYNAMIC TOKEN SIZING =====================
+
+    private int computeDynamicMaxTokens(List<GroqMessage> messages, String modelId) {
+        int estimatedInputTokens = estimateConversationTokens(messages);
+
+        int contextWindow = resolveContextWindow(modelId);
+
+        int safetyBuffer = Math.max(64, (int) (contextWindow * 0.05));
+        int roomForOutput = contextWindow - estimatedInputTokens - safetyBuffer;
+
+        int proportionalCeiling = Math.max(MIN_TOKENS, estimatedInputTokens * 2);
+
+        int candidate = Math.min(roomForOutput, proportionalCeiling);
+        candidate = Math.min(candidate, ABSOLUTE_MAX_TOKENS);
+        candidate = Math.max(candidate, MIN_TOKENS);
+
+        if (candidate < MIN_TOKENS) {
+            candidate = MIN_TOKENS;
+        }
+
+        log.debug("Dynamic max_tokens calc — model={}, contextWindow={}, estimatedInput={}, "
+                + "roomForOutput={}, proportionalCeiling={}, final={}",
+                modelId, contextWindow, estimatedInputTokens, roomForOutput, proportionalCeiling, candidate);
+
+        return candidate;
+    }
+
+    private int estimateConversationTokens(List<GroqMessage> messages) {
+        int total = estimateTokens(SYSTEM_PROMPT);
+        if (messages != null) {
+            for (GroqMessage m : messages) {
+                total += estimateTokens(m.getContent());
+                total += 4;
+            }
+        }
+        return total;
+    }
+
+    // FIX (restored): pichli file me ye method ke andar sirf ek TODO reh
+    // gaya tha (contextLength field abhi tak OpenRouterProperties.ModelInfo
+    // me exist hi nahi karta tha, isliye .getContextLength() call hata diya
+    // gaya tha taaki compile ho sake). Ab OpenRouterProperties.ModelInfo me
+    // contextLength field maujood hai, isliye asli logic wapas laga diya —
+    // configured value use hoga jab bhi available ho, warna safe default.
+    private int resolveContextWindow(String modelId) {
+        try {
+            for (OpenRouterProperties.ModelInfo item : properties.getChatModels()) {
+                if (item.getId() != null && item.getId().equals(modelId)) {
+                    int configured = item.getContextLength();
+                    if (configured > 0) {
+                        return configured;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not resolve configured context window for model {}, using default", modelId);
+        }
+        return DEFAULT_ASSUMED_CONTEXT_WINDOW;
+    }
+
+    private int estimateTokens(String text) {
+        if (text == null || text.isEmpty()) {
+            return 0;
+        }
+        return Math.max(1, (int) Math.ceil(text.length() / (double) CHARS_PER_TOKEN_ESTIMATE));
+    }
+
+    // ===================== REQUEST BUILDING =====================
+
+    private Map<String, Object> buildRequestBody(List<GroqMessage> messages, String modelId, boolean stream,
+            int maxTokens) {
         List<Map<String, String>> outMessages = new ArrayList<>();
         outMessages.add(message("system", SYSTEM_PROMPT));
+
+        // FIX (bhai's ask: "agar answer token se zyada ka hai to short mein
+        // answer de"): budget tight hone par model ko proactively concise
+        // rehne ka instruction dete hain, taaki wo khud hi apna jawaab
+        // budget ke hisaab se chhota rakhe — bajaye is ke ki wo normal-size
+        // jawaab likhna shuru kare aur max_tokens hit karke beech me kat
+        // jaaye.
+        if (maxTokens < CONCISE_MODE_THRESHOLD_TOKENS) {
+            outMessages.add(message("system", String.format(CONCISE_MODE_INSTRUCTION_TEMPLATE, maxTokens)));
+            log.info("Concise-mode instruction injected — budget only {} tokens (model={})", maxTokens, modelId);
+        }
 
         for (GroqMessage item : messages) {
             outMessages.add(message(item.getRole(), item.getContent()));
@@ -180,7 +378,7 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
         body.put("model", modelId);
         body.put("messages", outMessages);
         body.put("stream", stream);
-        body.put("max_tokens", 4096);
+        body.put("max_tokens", maxTokens);
         return body;
     }
 
@@ -195,19 +393,11 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
         return properties.resolveChatModel(modelId);
     }
 
-    // ── Error classification ─────────────────────────────────────────────
-    // OpenRouter error responses look like:
-    // { "error": { "message": "...", "code": 402, "metadata": {...} } }
-    // Hum body parse karke ek clean, human-readable message banate hain,
-    // taaki "Connection reset" jaisa confusing text kabhi user tak na jaye
-    // jab asal me balance/rate-limit ka issue ho.
     private Mono<Throwable> mapErrorResponse(ClientResponse response) {
         int statusCode = response.statusCode().value();
         return response.bodyToMono(String.class)
                 .defaultIfEmpty("")
                 .map(rawBody -> {
-                    // Full raw body WARN me daal rahe hain — agar metadata parsing
-                    // kuch miss kare bhi to raw JSON seedha logs me mil jayega.
                     log.warn("OpenRouter returned HTTP {} — raw body: {}", statusCode, rawBody);
                     return new OpenRouterException(buildErrorMessage(statusCode, rawBody));
                 });
@@ -216,25 +406,21 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
     private String buildErrorMessage(int statusCode, String rawBody) {
         String providerMessage = extractProviderMessage(rawBody);
 
-        // 402 = Payment Required (OpenRouter uses this for insufficient credits)
         if (statusCode == 402
                 || containsAny(providerMessage, "insufficient", "credit", "balance", "payment required")) {
             return "OPENROUTER_INSUFFICIENT_CREDITS: OpenRouter account/model par credits khatam ya insufficient hain. "
                     + "OpenRouter dashboard me balance check karein. Detail: " + providerMessage;
         }
 
-        // 429 = Too Many Requests (common on free models under load)
         if (statusCode == 429 || containsAny(providerMessage, "rate limit", "too many requests")) {
             return "OPENROUTER_RATE_LIMIT: OpenRouter/model abhi rate-limited hai (free models par common hai). "
                     + "Thodi der baad phir try karein. Detail: " + providerMessage;
         }
 
-        // 401/403 = auth issue with the OpenRouter API key
         if (statusCode == 401 || statusCode == 403) {
             return "OPENROUTER_AUTH_ERROR: OpenRouter API key invalid ya unauthorized hai. Detail: " + providerMessage;
         }
 
-        // 503/502 = upstream model provider down/overloaded
         if (statusCode == 503 || statusCode == 502) {
             return "OPENROUTER_PROVIDER_UNAVAILABLE: Is model ka upstream provider abhi unavailable hai. "
                     + "Doosra model try karein ya thodi der baad retry karein. Detail: " + providerMessage;
@@ -262,9 +448,6 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
                 sb.append(msg.asText());
             }
 
-            // ✅ Generic wrappers like "Provider returned error" hide the real
-            // reason inside error.metadata — provider_name (kaunsa upstream
-            // provider tha) aur raw (asli underlying error) dono nikaalte hain.
             JsonNode metadata = error.path("metadata");
             if (!metadata.isMissingNode()) {
                 JsonNode providerName = metadata.path("provider_name");
@@ -297,15 +480,11 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
         return false;
     }
 
-    // ── Transient network error detection ──────────────────────────────
-    // Ye sirf "connection tut gaya" jaisi cheezon ke liye true hoga —
-    // asli application errors (balance khatam, rate limit, bad key) ke liye
-    // false, taaki unpar hum kabhi retry na karein.
     private boolean isTransientNetworkError(Throwable ex) {
         if (ex == null)
             return false;
         if (ex instanceof OpenRouterException)
-            return false; // application-level error, don't retry
+            return false;
         if (ex instanceof SocketException)
             return true;
         if (ex instanceof WebClientRequestException)
@@ -327,14 +506,14 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
                 || msg.contains("connection error"));
     }
 
-    private void handleLine(String rawLine, Consumer<String> onChunk) {
+    private boolean handleLine(String rawLine, Consumer<String> onChunk) {
         if (rawLine == null) {
-            return;
+            return false;
         }
 
         String line = rawLine.trim();
         if (line.isEmpty()) {
-            return;
+            return false;
         }
 
         if (line.startsWith("data:")) {
@@ -342,29 +521,26 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
         }
 
         if (line.isEmpty() || "[DONE]".equals(line)) {
-            return;
+            return false;
         }
 
         try {
             GroqStreamChunk chunk = objectMapper.readValue(line, GroqStreamChunk.class);
             if (chunk.getChoices() == null || chunk.getChoices().isEmpty()) {
-                return;
+                return false;
             }
 
-            GroqStreamChunk.Delta delta = chunk.getChoices().get(0).getDelta();
+            GroqStreamChunk.Choice choice = chunk.getChoices().get(0);
+            GroqStreamChunk.Delta delta = choice.getDelta();
             if (delta != null && delta.getContent() != null && !delta.getContent().isEmpty()) {
                 onChunk.accept(delta.getContent());
             }
+
+            return "length".equals(choice.getFinishReason());
         } catch (Exception e) {
             log.debug("Skipping unparsable OpenRouter stream line: {}", line);
+            return false;
         }
-    }
-
-    private int estimateTokens(String text) {
-        if (text == null || text.isEmpty()) {
-            return 0;
-        }
-        return Math.max(1, text.length() / 4);
     }
 
     private boolean looksLikeCodeOrDocument(String text) {

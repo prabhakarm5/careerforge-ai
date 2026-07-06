@@ -4,8 +4,11 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
+import com.trackai.backend.entity.ChatMessage;
+
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Binds the "groq.*" section from application.yml — including the
@@ -34,6 +37,16 @@ public class GroqModelConfig {
         private boolean vision;
         private String provider = "GROQ";
         private String type = "chat";
+        // FIX (dynamic max_tokens): model ka total context window (tokens
+        // mein). GroqServiceImpl isse use karta hai ye calculate karne ke
+        // liye ki input + output milake kitna room available hai, taaki
+        // max_tokens hamesha input-size ke hisaab se dynamically decide ho,
+        // fixed value ki jagah. application.yml me har groq model ke against
+        // "context-length: <number>" set karo (Groq docs par model ki
+        // context window size di hoti hai). Agar set nahi karoge, 0 rahega
+        // aur GroqServiceImpl apne aap ek safe default (8192) assume kar
+        // lega — compile ya runtime crash nahi hoga.
+        private int contextLength;
     }
 
     /**
@@ -71,16 +84,20 @@ public class GroqModelConfig {
      * model is configured, returns that same model (no alternative
      * available — caller should treat this as a hard failure).
      */
-    public ModelInfo getFallbackModel(String currentModelId) {
+    public ModelInfo getFallbackModel(String currentModelId, Set<String> excludedIds) {
         if (models == null || models.isEmpty()) {
             return resolveModel(null);
         }
         for (ModelInfo m : models) {
-            if (!m.getId().equals(currentModelId)) {
-                return m;
+            if (!m.getId().equals(currentModelId) && !excludedIds.contains(m.getId())) {
+                return m; // first model we haven't tried yet this request
             }
         }
-        // only one model configured — nothing to fall back to
-        return models.get(0);
+        return null; // every configured model has already failed once
+    }
+
+    public ChatMessage getFallbackModel(String modelId) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'getFallbackModel'");
     }
 }

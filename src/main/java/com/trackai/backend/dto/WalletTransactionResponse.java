@@ -23,4 +23,9 @@ public class WalletTransactionResponse {
     private String description;
 
     private LocalDateTime createdAt;
+
+    // NEW — frontend reads these to show "current plan"
+    private String currentPlanId;
+
+    private String currentPlanName;
 }

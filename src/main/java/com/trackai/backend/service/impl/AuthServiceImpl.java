@@ -6,6 +6,7 @@ import com.trackai.backend.dto.LoginResponse;
 import com.trackai.backend.dto.RateLimitResponse;
 import com.trackai.backend.dto.RefreshTokenResponse;
 import com.trackai.backend.dto.RegisterRequest;
+import com.trackai.backend.dto.cache.CachedUser;
 import com.trackai.backend.dto.cloudinary.CloudinaryUploadResponse;
 import com.trackai.backend.entity.User;
 import com.trackai.backend.enums.Role;
@@ -16,6 +17,7 @@ import com.trackai.backend.service.CloudinaryService;
 import com.trackai.backend.service.EmailVerificationService;
 import com.trackai.backend.service.RedisRateLimitService;
 import com.trackai.backend.service.RedisRefreshTokenService;
+import com.trackai.backend.service.RedisUserCacheService;
 import com.trackai.backend.service.WalletService;
 
 import lombok.RequiredArgsConstructor;
@@ -39,6 +41,7 @@ public class AuthServiceImpl implements AuthService {
         private final RedisRateLimitService redisRateLimitService;
         private final RateLimitProperties rateLimitProperties;
         private final WalletService walletService;
+        private final RedisUserCacheService redisUserCacheService;
 
         // Normalize email
         private String normalizeEmail(String email) {
@@ -134,6 +137,25 @@ public class AuthServiceImpl implements AuthService {
 
                 // Save user
                 User savedUser = userRepository.save(user);
+
+                if (savedUser.getRole() != Role.ROLE_ADMIN) {
+
+                        CachedUser cachedUser = CachedUser.builder()
+                                        .id(savedUser.getId())
+                                        .name(savedUser.getName())
+                                        .email(savedUser.getEmail())
+                                        .role(savedUser.getRole())
+                                        .enabled(savedUser.getEnabled())
+                                        .blocked(savedUser.getBlocked())
+                                        .emailVerified(savedUser.getEmailVerified())
+                                        .mobileNumber(savedUser.getMobileNumber())
+                                        .profileImage(savedUser.getProfileImage())
+                                        .description(savedUser.getDescription())
+                                        .createdAt(savedUser.getCreatedAt())
+                                        .build();
+
+                        redisUserCacheService.saveUser(cachedUser);
+                }
 
                 // Create wallet
                 walletService.createWallet(
@@ -239,6 +261,24 @@ public class AuthServiceImpl implements AuthService {
                                 user.getEmail(),
                                 fingerprint,
                                 refreshToken);
+
+                CachedUser cachedUser = CachedUser.builder()
+                                .id(user.getId())
+                                .name(user.getName())
+                                .email(user.getEmail())
+                                .role(user.getRole())
+                                .enabled(user.getEnabled())
+                                .blocked(user.getBlocked())
+                                .emailVerified(user.getEmailVerified())
+                                .mobileNumber(user.getMobileNumber())
+                                .profileImage(user.getProfileImage())
+                                .description(user.getDescription())
+                                .createdAt(user.getCreatedAt())
+                                .build();
+
+                if (user.getRole() != Role.ROLE_ADMIN) {
+                        redisUserCacheService.saveUser(cachedUser);
+                }
                 // Response
                 return LoginResponse.builder()
                                 .id(user.getId())

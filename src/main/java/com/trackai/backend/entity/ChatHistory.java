@@ -20,11 +20,30 @@ public class ChatHistory {
     @Column(nullable = false)
     private String userId;
 
+    // PostgreSQL + MySQL Compatible
     @Column(columnDefinition = "TEXT")
     private String question;
 
-    @Column(columnDefinition = "LONGTEXT")
+    /*
+     * ============================
+     * PostgreSQL (ACTIVE)
+     * ============================
+     * PostgreSQL doesn't support LONGTEXT.
+     * TEXT can store up to ~1GB of data.
+     */
+    // @Lob
+    @Column(columnDefinition = "TEXT")
     private String response;
+
+    /*
+     * ============================
+     * MySQL (COMMENTED)
+     * ============================
+     * Uncomment this if switching back to MySQL.
+     */
+
+    // @Column(columnDefinition = "LONGTEXT")
+    // private String response;
 
     @Column(nullable = false)
     private Integer promptTokens;

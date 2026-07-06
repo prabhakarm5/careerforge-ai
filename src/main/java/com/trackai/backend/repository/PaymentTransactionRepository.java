@@ -13,17 +13,28 @@ import java.util.Optional;
 public interface PaymentTransactionRepository
                 extends JpaRepository<PaymentTransaction, String> {
 
-        // Find by order id
-        @Lock(LockModeType.PESSIMISTIC_WRITE)
-        Optional<PaymentTransaction> findByOrderId(
-                        String orderId);
+        /*
+         * ==========================================================
+         * PostgreSQL ✅
+         * MySQL ✅
+         *
+         * Ye repository PostgreSQL aur MySQL dono me compatible hai.
+         * 
+         * @Lock(LockModeType.PESSIMISTIC_WRITE) PostgreSQL support karta hai.
+         *
+         * Agar future me native SQL queries likhoge tab hi database-specific
+         * changes ki zarurat padegi.
+         * ==========================================================
+         */
 
-        // Find by payment id
+        // Find by Order ID (Thread-safe)
         @Lock(LockModeType.PESSIMISTIC_WRITE)
-        Optional<PaymentTransaction> findByPaymentId(
-                        String paymentId);
+        Optional<PaymentTransaction> findByOrderId(String orderId);
 
-        // User payment history
-        List<PaymentTransaction> findByUserIdOrderByCreatedAtDesc(
-                        String userId);
+        // Find by Payment ID (Thread-safe)
+        @Lock(LockModeType.PESSIMISTIC_WRITE)
+        Optional<PaymentTransaction> findByPaymentId(String paymentId);
+
+        // User Payment History
+        List<PaymentTransaction> findByUserIdOrderByCreatedAtDesc(String userId);
 }

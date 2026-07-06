@@ -14,4 +14,9 @@ public class WalletResponse {
     private Long usedTokens;
 
     private Long remainingTokens;
+
+    // NEW — frontend reads these to show "current plan"
+    private String currentPlanId;
+
+    private String currentPlanName;
 }

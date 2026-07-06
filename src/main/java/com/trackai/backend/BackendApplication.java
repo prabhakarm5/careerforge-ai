@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -22,6 +23,20 @@ import java.util.UUID;
 public class BackendApplication {
 
 	private static Logger logger = LoggerFactory.getLogger(BackendApplication.class);
+
+	// ✅ NEW: hardcoded values hata ke application.yml se pick ho rahe hain,
+	// jo aage se .env ke ADMIN_EMAIL / ADMIN_PASSWORD / ADMIN_MOBILE se aayenge.
+	@Value("${app.default-admin.email}")
+	private String adminEmail;
+
+	@Value("${app.default-admin.password}")
+	private String adminPassword;
+
+	@Value("${app.default-admin.mobile}")
+	private String adminMobile;
+
+	@Value("${app.default-admin.name}")
+	private String adminName;
 
 	public static void main(String[] args) {
 
@@ -39,8 +54,6 @@ public class BackendApplication {
 
 		return args -> {
 
-			String adminEmail = "prabhakarm725@gmail.com";
-
 			// CHECK ADMIN EXISTS
 			if (userRepository
 					.findByEmail(adminEmail)
@@ -50,13 +63,13 @@ public class BackendApplication {
 
 						.id(UUID.randomUUID().toString())
 
-						.name("Super Admin")
+						.name(adminName)
 
 						.email(adminEmail)
 
 						.password(
 								passwordEncoder.encode(
-										"admin123"))
+										adminPassword))
 
 						.blocked(false)
 
@@ -67,7 +80,7 @@ public class BackendApplication {
 						.role(Role.ROLE_ADMIN)
 
 						.createdAt(LocalDateTime.now())
-						.mobileNumber("9026106605")
+						.mobileNumber(adminMobile)
 
 						.build();
 

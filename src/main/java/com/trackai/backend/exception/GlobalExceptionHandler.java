@@ -6,15 +6,19 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.NoHandlerFoundException;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -63,6 +67,71 @@ public class GlobalExceptionHandler {
                                 .build();
 
                 return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+        }
+
+        // ✅ NEW: WRONG HTTP METHOD -> 405
+        // Ye tab fire hota hai jab koi endpoint galat method se hit ho
+        // (e.g. POST-only route pe GET bhej diya, ya GET-only pe DELETE bhej diya).
+        // Spring khud "Method Not Allowed" bolta hai lekin default response
+        // JSON mein saaf nahi hota — isliye yahan clean message bana rahe hain,
+        // aur ye bhi bata rahe hain ki kaunse methods actually allowed hain.
+        @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+        public ResponseEntity<ErrorResponse> handleMethodNotSupported(
+                        HttpRequestMethodNotSupportedException ex,
+                        HttpServletRequest request) {
+
+                String supportedMethods = ex.getSupportedHttpMethods() != null
+                                ? ex.getSupportedHttpMethods()
+                                                .stream()
+                                                .map(Object::toString)
+                                                .collect(Collectors.joining(", "))
+                                : "unknown";
+
+                String message = String.format(
+                                "'%s' method is not allowed for this endpoint. Allowed method(s): %s",
+                                ex.getMethod(),
+                                supportedMethods);
+
+                return new ResponseEntity<>(
+                                buildResponse(HttpStatus.METHOD_NOT_ALLOWED, "Method Not Allowed", message, request),
+                                HttpStatus.METHOD_NOT_ALLOWED);
+        }
+
+        // ✅ NEW: ENDPOINT DOES NOT EXIST -> 404
+        // Jab bilkul galat URL hi hit kar diya jo kahin map hi nahi hota.
+        // NOTE: Ye tabhi kaam karega jab application.yml mein
+        // spring.mvc.throw-exception-if-no-handler-found=true aur
+        // spring.web.resources.add-mappings=false set ho, warna Spring
+        // default whitelabel 404 dikha dega isse pehle hi.
+        @ExceptionHandler(NoHandlerFoundException.class)
+        public ResponseEntity<ErrorResponse> handleNoHandlerFound(
+                        NoHandlerFoundException ex,
+                        HttpServletRequest request) {
+
+                String message = String.format(
+                                "No endpoint found for '%s %s'",
+                                ex.getHttpMethod(),
+                                ex.getRequestURL());
+
+                return new ResponseEntity<>(
+                                buildResponse(HttpStatus.NOT_FOUND, "Endpoint Not Found", message, request),
+                                HttpStatus.NOT_FOUND);
+        }
+
+        // ✅ NEW: MALFORMED JSON BODY -> 400
+        // Jab request body invalid JSON ho, ya array bhej diya jahan object
+        // expect ho raha tha (jaisa abhi tumhare plans wale case mein hua),
+        // ya required field ka type galat ho (string ki jagah number, etc.)
+        @ExceptionHandler(HttpMessageNotReadableException.class)
+        public ResponseEntity<ErrorResponse> handleMessageNotReadable(
+                        HttpMessageNotReadableException ex,
+                        HttpServletRequest request) {
+
+                String message = "Request body is invalid or malformed. Please check the JSON format and field types.";
+
+                return new ResponseEntity<>(
+                                buildResponse(HttpStatus.BAD_REQUEST, "Malformed Request Body", message, request),
+                                HttpStatus.BAD_REQUEST);
         }
 
         // RESOURCE NOT FOUND -> 404
@@ -193,7 +262,7 @@ public class GlobalExceptionHandler {
                                 HttpStatus.BAD_REQUEST);
         }
 
-        // GENERAL EXCEPTION (anything non-Runtime, unexpected)
+        // GENERAL EXCEPTION (anything non-Runtime, unexpected) -> 500
         @ExceptionHandler(Exception.class)
         public ResponseEntity<ErrorResponse> handleException(
                         Exception ex,
@@ -201,7 +270,7 @@ public class GlobalExceptionHandler {
 
                 return new ResponseEntity<>(
                                 buildResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Internal Server Error",
-                                                "Something went wrong", request),
+                                                "Something went wrong. Please try again later.", request),
                                 HttpStatus.INTERNAL_SERVER_ERROR);
         }
 }

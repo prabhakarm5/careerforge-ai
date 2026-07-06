@@ -16,4 +16,11 @@ public interface PaymentService {
 
         // Current user's payment history
         List<PaymentHistoryResponse> getPaymentHistory();
+
+        // Handle webhook from payment gateway
+        void handleWebhook(String payload, String signatureHeader);
+
+        // Mark payment as cancelled (used when user cancels the payment flow)
+        void markPaymentCancelled(String orderId, String reason);
+
 }

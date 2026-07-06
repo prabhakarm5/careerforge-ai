@@ -116,5 +116,13 @@ public class OpenRouterProperties {
         private boolean vision;
         private String provider = "OPENROUTER";
         private String type = "chat";
+        // FIX (dynamic max_tokens): model ka total context window (tokens
+        // mein), taaki OpenRouterChatServiceImpl ye calculate kar sake ki
+        // input + output milake kitna room available hai. application.yml
+        // me har chat model ke against "context-length: <number>" set karo
+        // (OpenRouter model page par ye value dikh jaati hai). Agar set
+        // nahi karoge to 0 rahega aur code apne aap ek safe default
+        // (16000) assume kar lega — crash nahi hoga.
+        private int contextLength;
     }
 }

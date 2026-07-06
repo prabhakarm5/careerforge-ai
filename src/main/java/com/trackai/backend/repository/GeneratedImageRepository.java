@@ -9,12 +9,22 @@ import java.util.List;
 import java.util.Optional;
 
 public interface GeneratedImageRepository
-        extends JpaRepository<GeneratedImage, String> {
+                extends JpaRepository<GeneratedImage, String> {
 
-    List<GeneratedImage> findByUserOrderByCreatedAtDesc(User user);
+        /*
+         * ==========================================================
+         * PostgreSQL ✅
+         * MySQL ✅
+         *
+         * Ye repository dono databases me same tarah kaam karegi.
+         * Kisi bhi method ko change karne ki zarurat nahi hai.
+         * ==========================================================
+         */
 
-    Optional<GeneratedImage> findByIdAndUser(
-            String id,
-            User user);
+        List<GeneratedImage> findByUserOrderByCreatedAtDesc(User user);
+
+        Optional<GeneratedImage> findByIdAndUser(
+                        String id,
+                        User user);
 
 }

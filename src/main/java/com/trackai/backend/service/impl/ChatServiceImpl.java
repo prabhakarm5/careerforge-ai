@@ -12,7 +12,6 @@ import com.trackai.backend.entity.Conversation;
 import com.trackai.backend.entity.User;
 import com.trackai.backend.entity.Wallet;
 import com.trackai.backend.enums.FeatureType;
-import com.trackai.backend.exception.GroqRateLimitException;
 import com.trackai.backend.exception.InsufficientTokensException;
 import com.trackai.backend.exception.RateLImitException;
 import com.trackai.backend.repository.ChatMessageRepository;
@@ -24,15 +23,22 @@ import com.trackai.backend.service.OpenRouterChatService;
 import com.trackai.backend.service.RedisRateLimitService;
 import com.trackai.backend.service.WalletService;
 
-import lombok.RequiredArgsConstructor;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.Disposable;
+import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.MediaType;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -40,13 +46,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ChatServiceImpl implements ChatService {
 
         private final GroqService groqService;
@@ -58,17 +63,153 @@ public class ChatServiceImpl implements ChatService {
         private final RateLimitProperties rateLimitProperties;
         private final ConversationRepository conversationRepository;
         private final ChatMessageRepository chatMessageRepository;
-        private final ObjectMapper objectMapper = new ObjectMapper();
+        private final MemoryRetrievalService memoryRetrievalService;
+        private final ObjectMapper objectMapper;
 
-        private final Executor streamExecutor = Executors.newCachedThreadPool();
+        private final ThreadPoolTaskExecutor streamExecutor;
 
-        private static final long SSE_TIMEOUT_MS = 5 * 60 * 1000L;
+        private static final Duration STREAM_HEARTBEAT = Duration.ofSeconds(15);
+        private static final Duration STREAM_TIMEOUT = Duration.ofMinutes(10);
+        private static final long SSE_TIMEOUT_MS = STREAM_TIMEOUT.toMillis();
 
-        // Ab ye sirf Groq built-in model list ke fallback attempts ki cap nahi
-        // balki koi bhi provider ke liye max retry-chain length hai. Jab tak
-        // groqModelConfig / openRouterChatService koi NAYA fallback model de
-        // pa rahe hain, hum isse zyada attempts tak try karte rahenge (neeche
-        // "fallbackModel == currentModel" check hi asli stop condition hai).
+        private static final int MAX_MEMORY_MESSAGES = 20;
+
+        private static final String EVENT_PING = "ping";
+
+        private static final MediaType JSON = MediaType.APPLICATION_JSON;
+
+        private final ConcurrentHashMap<String, Disposable> heartbeatTasks = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, AtomicBoolean> streamClosed = new ConcurrentHashMap<>();
+
+        public ChatServiceImpl(
+                        GroqService groqService,
+                        OpenRouterChatService openRouterChatService,
+                        GroqModelConfig groqModelConfig,
+                        WalletService walletService,
+                        UserRepository userRepository,
+                        RedisRateLimitService redisRateLimitService,
+                        RateLimitProperties rateLimitProperties,
+                        ConversationRepository conversationRepository,
+                        ChatMessageRepository chatMessageRepository,
+                        MemoryRetrievalService memoryRetrievalService,
+                        ObjectMapper objectMapper) {
+
+                this.groqService = groqService;
+                this.openRouterChatService = openRouterChatService;
+                this.groqModelConfig = groqModelConfig;
+                this.walletService = walletService;
+                this.userRepository = userRepository;
+                this.redisRateLimitService = redisRateLimitService;
+                this.rateLimitProperties = rateLimitProperties;
+                this.conversationRepository = conversationRepository;
+                this.chatMessageRepository = chatMessageRepository;
+                this.memoryRetrievalService = memoryRetrievalService;
+                this.objectMapper = objectMapper;
+
+                this.streamExecutor = new ThreadPoolTaskExecutor();
+                this.streamExecutor.setCorePoolSize(10);
+                this.streamExecutor.setMaxPoolSize(50);
+                this.streamExecutor.setQueueCapacity(1000);
+                this.streamExecutor.setThreadNamePrefix("trackai-stream-");
+                this.streamExecutor.setWaitForTasksToCompleteOnShutdown(true);
+                this.streamExecutor.setAwaitTerminationSeconds(30);
+                this.streamExecutor.initialize();
+        }
+
+        private void startHeartbeat(String conversationId, SseEmitter emitter) {
+
+                AtomicBoolean closed = new AtomicBoolean(false);
+                streamClosed.put(conversationId, closed);
+
+                Disposable disposable = Flux.interval(STREAM_HEARTBEAT)
+                                .subscribeOn(Schedulers.boundedElastic())
+                                .takeWhile(tick -> !closed.get())
+                                .subscribe(
+                                                tick -> {
+                                                        boolean sent = safeSend(emitter, EVENT_PING, "heartbeat");
+                                                        if (!sent) {
+                                                                closed.set(true);
+                                                                completeEmitter(emitter, conversationId);
+                                                        }
+                                                },
+                                                error -> {
+                                                        closed.set(true);
+                                                        completeEmitter(emitter, conversationId);
+                                                });
+
+                heartbeatTasks.put(conversationId, disposable);
+        }
+
+        private void registerEmitterCallbacks(String conversationId, SseEmitter emitter) {
+
+                emitter.onCompletion(() -> {
+                        log.info("SSE completed {}", conversationId);
+                        completeEmitter(emitter, conversationId);
+                });
+
+                emitter.onTimeout(() -> {
+                        log.warn("SSE timeout {}", conversationId);
+                        completeEmitter(emitter, conversationId);
+                });
+
+                emitter.onError(ex -> {
+                        log.warn("SSE error {} {}", conversationId, ex.getMessage());
+                        completeEmitter(emitter, conversationId);
+                });
+        }
+
+        @PreDestroy
+        public void shutdown() {
+                heartbeatTasks.values().forEach(Disposable::dispose);
+                heartbeatTasks.clear();
+                streamClosed.clear();
+                streamExecutor.shutdown();
+        }
+
+        private boolean safeSend(SseEmitter emitter, String event, Object payload) {
+
+                if (emitter == null) {
+                        return false;
+                }
+
+                try {
+                        SseEmitter.SseEventBuilder builder = SseEmitter.event().name(event);
+
+                        if (payload == null) {
+                                builder.data("");
+                        } else if (payload instanceof String str) {
+                                builder.data(str);
+                        } else {
+                                builder.data(objectMapper.writeValueAsString(payload), JSON);
+                        }
+
+                        emitter.send(builder);
+                        return true;
+
+                } catch (IOException ex) {
+                        log.warn("Client disconnected while sending event {}", event);
+                        return false;
+                } catch (IllegalStateException ex) {
+                        log.warn("Emitter already completed.");
+                        return false;
+                } catch (Exception ex) {
+                        log.error("Failed to send SSE event {}", event, ex);
+                        return false;
+                }
+        }
+
+        private void completeEmitter(SseEmitter emitter, String conversationId) {
+                try {
+                        Disposable heartbeat = heartbeatTasks.remove(conversationId);
+                        if (heartbeat != null) {
+                                heartbeat.dispose();
+                        }
+                        streamClosed.remove(conversationId);
+                        emitter.complete();
+                } catch (Exception ignored) {
+                }
+        }
+
         private static final int MAX_MODEL_ATTEMPTS = 6;
 
         private static final String CONTINUATION_INSTRUCTION = "Continue your previous answer exactly from where it stopped. "
@@ -78,33 +219,65 @@ public class ChatServiceImpl implements ChatService {
 
         // ===================== AUTH USER =====================
         private User getAuthenticatedUser() {
-                Authentication authentication = SecurityContextHolder
-                                .getContext()
-                                .getAuthentication();
-
+                Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
                 String email = authentication.getName();
-
-                return userRepository
-                                .findByEmail(email)
+                return userRepository.findByEmail(email)
                                 .orElseThrow(() -> new RuntimeException("User not found"));
         }
 
         // ===================== TITLE =====================
-        private String generateTitle(String message) {
-                String title;
-                try {
-                        title = groqService.generateTitle(message);
-                } catch (Exception e) {
-                        title = message;
+        private String buildPlaceholderTitle(String message) {
+                if (message == null || message.isBlank()) {
+                        return "New Chat";
                 }
-                if (title == null || title.isBlank()) {
-                        title = message;
-                }
-                title = title.trim();
-                if (title.length() > 80) {
-                        title = title.substring(0, 80) + "...";
-                }
-                return title;
+                String trimmed = message.trim();
+                return trimmed.length() > 60 ? trimmed.substring(0, 60) + "..." : trimmed;
+        }
+
+        // FIX (root-cause #1): this used to mutate + save the SAME
+        // `conversation` Java object that the main streaming thread also
+        // mutates + saves in finalizeStream() (setUpdatedAt). Two threads
+        // writing the same entity instance concurrently, each calling
+        // .save() independently, could stomp on each other's in-memory
+        // field changes and — depending on JPA dirty-checking/flush timing —
+        // throw or silently lose a write. Now this thread ONLY ever touches
+        // the `title` column, via a dedicated repository method that does a
+        // targeted UPDATE instead of re-saving the whole entity graph. It
+        // never shares mutable state with finalizeStream() anymore.
+        //
+        // Add this method to ConversationRepository if missing:
+        //
+        // @Modifying
+        // @Query("UPDATE Conversation c SET c.title = :title WHERE c.id = :id")
+        // int updateTitle(@Param("id") String id, @Param("title") String title);
+        //
+        private void generateTitleAsync(Conversation conversation, String firstMessage, SseEmitter emitter) {
+                streamExecutor.execute(() -> {
+                        try {
+                                String title = groqService.generateTitle(firstMessage);
+                                if (title == null || title.isBlank()) {
+                                        return;
+                                }
+                                title = title.trim();
+                                if (title.length() > 80) {
+                                        title = title.substring(0, 80) + "...";
+                                }
+
+                                conversationRepository.updateTitle(conversation.getId(), title);
+                                // keep the in-memory copy in sync for anything reading it
+                                // later in this same request lifecycle (best-effort only —
+                                // never re-persisted from here).
+                                conversation.setTitle(title);
+
+                                Map<String, Object> payload = new HashMap<>();
+                                payload.put("conversationId", conversation.getId());
+                                payload.put("title", title);
+                                safeSend(emitter, "title_updated", payload);
+                        } catch (Exception e) {
+                                log.warn("Async title generation failed for conversation {}: {}",
+                                                conversation.getId(), e.getMessage());
+                        }
+                });
         }
 
         // ===================== CREATE CONVERSATION =====================
@@ -112,9 +285,10 @@ public class ChatServiceImpl implements ChatService {
                 Conversation conversation = Conversation.builder()
                                 .id(UUID.randomUUID().toString())
                                 .userId(user.getId())
-                                .title(generateTitle(firstMessage))
+                                .title(buildPlaceholderTitle(firstMessage))
                                 .featureType(FeatureType.CHAT)
                                 .archived(false)
+                                .pinned(false)
                                 .createdAt(LocalDateTime.now())
                                 .updatedAt(LocalDateTime.now())
                                 .build();
@@ -151,7 +325,8 @@ public class ChatServiceImpl implements ChatService {
         // ===================== MEMORY =====================
         private List<GroqMessage> buildConversationMemory(String conversationId) {
                 List<ChatMessage> recentMessages = chatMessageRepository
-                                .findTop10ByConversationIdOrderByCreatedAtDesc(conversationId);
+                                .findByConversationIdOrderByCreatedAtDesc(
+                                                conversationId, PageRequest.of(0, MAX_MEMORY_MESSAGES));
 
                 Collections.reverse(recentMessages);
 
@@ -161,6 +336,29 @@ public class ChatServiceImpl implements ChatService {
                                                 message.getRole().toLowerCase(),
                                                 message.getContent()))
                                 .collect(Collectors.toList());
+        }
+
+        // ===================== ON-DEMAND RAG =====================
+        private void augmentWithRecalledContext(List<GroqMessage> memory, String conversationId,
+                        String userMessage) {
+
+                if (!memoryRetrievalService.isRecallIntent(userMessage)) {
+                        return;
+                }
+
+                List<String> snippets = memoryRetrievalService.retrieveRelevant(conversationId, userMessage);
+                if (snippets.isEmpty()) {
+                        return;
+                }
+
+                String context = "Relevant earlier context from this conversation "
+                                + "(use only if actually relevant to the current question):\n"
+                                + String.join("\n---\n", snippets);
+
+                memory.add(0, GroqMessage.builder().role("system").content(context).build());
+
+                log.info("RAG: injected {} recalled snippet(s) for conversation {}",
+                                snippets.size(), conversationId);
         }
 
         private int estimateTokens(String text) {
@@ -181,28 +379,35 @@ public class ChatServiceImpl implements ChatService {
                 if (requestedModel != null && requestedModel.startsWith("openrouter:")) {
                         return requestedModel.substring("openrouter:".length());
                 }
-
                 return requestedModel == null || requestedModel.isBlank()
                                 || "openrouter".equalsIgnoreCase(requestedModel)
                                                 ? openRouterChatService.getDefaultModel()
                                                 : requestedModel;
         }
 
-        /**
-         * OpenRouter ke available chat models me se, current model ke alawa
-         * pehla doosra model dhoondta hai — taaki mid-stream error par
-         * OpenRouter side bhi kisi aur model par switch ho sake.
-         * Agar koi doosra model na mile, current model hi wapas kar deta hai
-         * (jo caller ke liye "no more fallback" signal hai).
-         */
-        private String getOpenRouterFallbackModel(String currentModelId) {
+        // FIX (bhai's ask: "model choose kr ke fallback"): pehle ye method
+        // sirf OpenRouter ke available models ki list se "current model
+        // chhod ke pehla jo bhi mil jaaye" utha leta tha — is baat ki koi
+        // guarantee nahi thi ki wo naya model current conversation ko
+        // (uske context-size ke hisaab se) handle bhi kar payega ya nahi.
+        // Agar conversation bada tha aur fallback model ka context window
+        // chhota, wo turant ek ALAG reason (context overflow) se fail ho
+        // jaata, aur fallback chain bewajah lambi ho jaati.
+        //
+        // Ab: poori decision OpenRouterChatServiceImpl.pickFallbackModel()
+        // ko di gayi hai, jo current conversation (memory) ki estimated
+        // token size dekh kar sirf un models me se choose karta hai jinka
+        // context window use comfortably fit kar sake, aur unme se sabse
+        // bada context window wala model pick karta hai (safest bet).
+        // Isiliye ab memory bhi pass karna padta hai — sirf modelId kaafi
+        // nahi tha is decision ke liye.
+        //
+        // REQUIRED: OpenRouterChatService interface me ye method signature
+        // add karna zaroori hai, warna niche wali call compile nahi hogi:
+        // String pickFallbackModel(List<GroqMessage> messages, String excludeModelId);
+        private String getOpenRouterFallbackModel(String currentModelId, List<GroqMessage> memory) {
                 try {
-                        return openRouterChatService.getAvailableModels()
-                                        .stream()
-                                        .map(GroqModelConfig.ModelInfo::getId)
-                                        .filter(id -> id != null && !id.equals(currentModelId))
-                                        .findFirst()
-                                        .orElse(currentModelId);
+                        return openRouterChatService.pickFallbackModel(memory, currentModelId);
                 } catch (Exception e) {
                         log.warn("Could not resolve OpenRouter fallback model", e);
                         return currentModelId;
@@ -229,6 +434,8 @@ public class ChatServiceImpl implements ChatService {
 
                 if (request.getConversationId() == null || request.getConversationId().isBlank()) {
                         conversation = createConversation(user, request.getMessage());
+                        conversation.setTitle(generateTitleBlocking(request.getMessage()));
+                        conversationRepository.save(conversation);
                 } else {
                         conversation = conversationRepository.findById(request.getConversationId())
                                         .orElseThrow(() -> new RuntimeException("Conversation not found"));
@@ -237,6 +444,7 @@ public class ChatServiceImpl implements ChatService {
                 saveUserMessage(conversation.getId(), request.getMessage());
 
                 List<GroqMessage> messages = buildConversationMemory(conversation.getId());
+                augmentWithRecalledContext(messages, conversation.getId(), request.getMessage());
                 messages.add(GroqMessage.builder().role("user").content(request.getMessage()).build());
 
                 boolean useOpenRouter = isOpenRouterModel(request.getModel());
@@ -260,6 +468,19 @@ public class ChatServiceImpl implements ChatService {
                 response.setTitle(conversation.getTitle());
 
                 return response;
+        }
+
+        private String generateTitleBlocking(String message) {
+                try {
+                        String title = groqService.generateTitle(message);
+                        if (title == null || title.isBlank()) {
+                                return buildPlaceholderTitle(message);
+                        }
+                        title = title.trim();
+                        return title.length() > 80 ? title.substring(0, 80) + "..." : title;
+                } catch (Exception e) {
+                        return buildPlaceholderTitle(message);
+                }
         }
 
         // ===================== STREAMING =====================
@@ -306,6 +527,7 @@ public class ChatServiceImpl implements ChatService {
                 }
 
                 List<GroqMessage> memory = buildConversationMemory(conversation.getId());
+                augmentWithRecalledContext(memory, conversation.getId(), request.getMessage());
                 memory.add(GroqMessage.builder().role("user").content(request.getMessage()).build());
 
                 boolean useOpenRouter = isOpenRouterModel(request.getModel());
@@ -331,9 +553,12 @@ public class ChatServiceImpl implements ChatService {
                         log.warn("Failed to send meta event", e);
                 }
 
-                emitter.onTimeout(() -> log.warn("SSE timed out for conversation {}", conversation.getId()));
-                emitter.onError(ex -> log.warn("SSE error for conversation {}: {}", conversation.getId(),
-                                ex.getMessage()));
+                registerEmitterCallbacks(conversation.getId(), emitter);
+                startHeartbeat(conversation.getId(), emitter);
+
+                if (isNewConversation) {
+                        generateTitleAsync(conversation, request.getMessage(), emitter);
+                }
 
                 streamExecutor.execute(() -> {
                         if (useOpenRouter) {
@@ -348,15 +573,6 @@ public class ChatServiceImpl implements ChatService {
                 return emitter;
         }
 
-        /**
-         * modelId: is attempt me jis model ka use ho raha hai
-         * memory: is attempt ko bheja jaane wala conversation context
-         * (agar ye ek retry/continuation hai to isme already
-         * "assistant: <ab tak ka partial jawab>" + continuation
-         * instruction judi hui hoti hai)
-         * accumulated: PORE stream ka ab tak ka poora text (sab attempts
-         * milaakar) — yehi cheez finalizeStream() me jaati hai
-         */
         private void attemptOpenRouterStream(SseEmitter emitter, User user, Conversation conversation,
                         List<GroqMessage> memory, String modelId, int attemptNumber,
                         StringBuilder accumulated) {
@@ -378,24 +594,15 @@ public class ChatServiceImpl implements ChatService {
                                                         log.debug("Client disconnected mid-stream: {}", e.getMessage());
                                                 }
                                         },
-                                        () -> {
-                                                try {
-                                                        finalizeStream(emitter, user, conversation,
-                                                                        accumulated.toString(), "OPENROUTER", modelId);
-                                                } catch (Exception e) {
-                                                        log.error("Failed to finalize OpenRouter stream", e);
-                                                        try {
-                                                                emitter.completeWithError(e);
-                                                        } catch (Exception ignored) {
-                                                        }
-                                                }
-                                        },
+                                        () -> finalizeStreamSafely(emitter, user, conversation,
+                                                        accumulated.toString(), "OPENROUTER", modelId),
                                         err -> {
                                                 log.error("OpenRouter streaming error (attempt {}): {}",
                                                                 attemptNumber, err.toString());
 
                                                 if (attemptNumber < MAX_MODEL_ATTEMPTS) {
-                                                        String fallbackModel = getOpenRouterFallbackModel(modelId);
+                                                        String fallbackModel = getOpenRouterFallbackModel(modelId,
+                                                                        memory);
 
                                                         if (!fallbackModel.equals(modelId)) {
                                                                 notifyModelSwitch(emitter, modelId, fallbackModel);
@@ -411,17 +618,10 @@ public class ChatServiceImpl implements ChatService {
                                                         }
                                                 }
 
-                                                // Ab koi aur fallback model available nahi -- sirf yahan
-                                                // partial ko final maana jaata hai, error aane ke turant
-                                                // baad nahi.
                                                 if (accumulated.length() > 0) {
-                                                        try {
-                                                                finalizeStream(emitter, user, conversation,
-                                                                                accumulated.toString(), "OPENROUTER",
-                                                                                modelId);
-                                                                return;
-                                                        } catch (Exception ignored) {
-                                                        }
+                                                        finalizeStreamSafely(emitter, user, conversation,
+                                                                        accumulated.toString(), "OPENROUTER", modelId);
+                                                        return;
                                                 }
                                                 sendErrorAndComplete(emitter, "OPENROUTER_ERROR",
                                                                 "OpenRouter could not generate a response. Please try again or choose another model.");
@@ -430,7 +630,7 @@ public class ChatServiceImpl implements ChatService {
                         log.error("Unexpected OpenRouter streaming failure", e);
 
                         if (attemptNumber < MAX_MODEL_ATTEMPTS) {
-                                String fallbackModel = getOpenRouterFallbackModel(modelId);
+                                String fallbackModel = getOpenRouterFallbackModel(modelId, memory);
                                 if (!fallbackModel.equals(modelId)) {
                                         notifyModelSwitch(emitter, modelId, fallbackModel);
                                         List<GroqMessage> continuationMemory = buildContinuationMemory(memory,
@@ -443,12 +643,9 @@ public class ChatServiceImpl implements ChatService {
                         }
 
                         if (accumulated.length() > 0) {
-                                try {
-                                        finalizeStream(emitter, user, conversation,
-                                                        accumulated.toString(), "OPENROUTER", modelId);
-                                        return;
-                                } catch (Exception ignored) {
-                                }
+                                finalizeStreamSafely(emitter, user, conversation,
+                                                accumulated.toString(), "OPENROUTER", modelId);
+                                return;
                         }
                         sendErrorAndComplete(emitter, "OPENROUTER_ERROR",
                                         "OpenRouter could not generate a response. Please try again or choose another model.");
@@ -464,12 +661,9 @@ public class ChatServiceImpl implements ChatService {
                                         memory,
                                         modelId,
                                         imageBase64,
-                                        // onChunk
                                         chunk -> {
                                                 accumulated.append(chunk);
                                                 try {
-                                                        // Send chunks as JSON so whitespace is preserved across
-                                                        // WebClient, SseEmitter, proxies, and frontend parsing.
                                                         Map<String, String> payload = new HashMap<>();
                                                         payload.put("content", chunk);
                                                         emitter.send(SseEmitter.event()
@@ -481,22 +675,8 @@ public class ChatServiceImpl implements ChatService {
                                                         log.debug("Client disconnected mid-stream: {}", e.getMessage());
                                                 }
                                         },
-                                        // onComplete
-                                        () -> {
-                                                try {
-                                                        finalizeStream(emitter, user, conversation,
-                                                                        accumulated.toString(), "GROQ", modelId);
-                                                } catch (Exception e) {
-                                                        log.error("Failed to finalize stream", e);
-                                                        try {
-                                                                emitter.completeWithError(e);
-                                                        } catch (Exception ignored) {
-                                                        }
-                                                }
-                                        },
-                                        // onError -- ab sirf GroqRateLimitException nahi, HAR stream
-                                        // error par (network drop, socket reset, provider 5xx, etc.)
-                                        // fallback model try karega, jab tak attempts bache hain.
+                                        () -> finalizeStreamSafely(emitter, user, conversation,
+                                                        accumulated.toString(), "GROQ", modelId),
                                         err -> {
                                                 log.error("Groq streaming error (attempt {}): {}",
                                                                 attemptNumber, err.toString());
@@ -522,16 +702,10 @@ public class ChatServiceImpl implements ChatService {
                                                         log.error("No alternate model available to fall back to");
                                                 }
 
-                                                // Ab koi aur fallback nahi bacha -- ab hi (aur sirf ab)
-                                                // partial response ko final answer maana jaayega.
                                                 if (accumulated.length() > 0) {
-                                                        try {
-                                                                finalizeStream(emitter, user, conversation,
-                                                                                accumulated.toString(), "GROQ",
-                                                                                modelId);
-                                                                return;
-                                                        } catch (Exception ignored) {
-                                                        }
+                                                        finalizeStreamSafely(emitter, user, conversation,
+                                                                        accumulated.toString(), "GROQ", modelId);
+                                                        return;
                                                 }
                                                 sendErrorAndComplete(emitter, "GROQ_BUSY",
                                                                 "All AI models are busy right now. Please try again shortly.");
@@ -552,23 +726,15 @@ public class ChatServiceImpl implements ChatService {
                         }
 
                         if (accumulated.length() > 0) {
-                                try {
-                                        finalizeStream(emitter, user, conversation,
-                                                        accumulated.toString(), "GROQ", modelId);
-                                        return;
-                                } catch (Exception ignored) {
-                                }
+                                finalizeStreamSafely(emitter, user, conversation,
+                                                accumulated.toString(), "GROQ", modelId);
+                                return;
                         }
                         sendErrorAndComplete(emitter, "GENERAL",
                                         "Something went wrong while generating the response.");
                 }
         }
 
-        /**
-         * Model switch hone par frontend ko inform karta hai. Best-effort hai
-         * -- fail ho jaaye to bhi stream continue hota hai, is wajah se
-         * blocking nahi hoga.
-         */
         private void notifyModelSwitch(SseEmitter emitter, String fromModel, String toModel) {
                 try {
                         Map<String, Object> switched = new HashMap<>();
@@ -585,12 +751,6 @@ public class ChatServiceImpl implements ChatService {
                 }
         }
 
-        /**
-         * Jab model switch hota hai, purana original memory copy karke usme
-         * ab tak ka partial assistant answer + ek "continue from here"
-         * instruction add karta hai, taaki naya model shuru se jawab na de
-         * balki wahi se aage badhaye jaha purana model ruka tha.
-         */
         private List<GroqMessage> buildContinuationMemory(List<GroqMessage> originalMemory,
                         StringBuilder accumulated) {
                 List<GroqMessage> continuationMemory = new ArrayList<>(originalMemory);
@@ -609,10 +769,43 @@ public class ChatServiceImpl implements ChatService {
                 return continuationMemory;
         }
 
-        private void finalizeStream(SseEmitter emitter, User user, Conversation conversation, String fullText)
-                        throws Exception {
-
-                finalizeStream(emitter, user, conversation, fullText, null, null);
+        // FIX (root-cause #1, wrapper): finalizeStream() used to be called
+        // inside a try/catch that, on ANY exception (DB save failing,
+        // wallet service throwing something unexpected, etc.), called
+        // emitter.completeWithError(e) — which tears the HTTP connection
+        // down with NO "done" and NO "error" SSE frame ever sent. The
+        // frontend then sees a raw connection failure, which still preserves
+        // the streamed text in its store... but ChatPage.jsx's render/commit
+        // logic (fixed separately, see chatStreamStore.js /
+        // ChatPage.jsx notes) required a clean "done" to ever show or commit
+        // it. So a message that was 100% successfully generated could look
+        // like it "disappeared".
+        //
+        // Now: finalizeStreamSafely() ALWAYS results in either a "done" or
+        // an "error" SSE event being sent — even if the DB write for
+        // conversation.updatedAt fails, we still ack the client so it can
+        // commit the already-rendered text. The one thing that truly must
+        // not fail silently (saving the assistant's message so it isn't
+        // lost) is attempted first and separately from the "nice to have"
+        // conversation.updatedAt bump.
+        private void finalizeStreamSafely(SseEmitter emitter, User user, Conversation conversation,
+                        String fullText, String provider, String model) {
+                try {
+                        finalizeStream(emitter, user, conversation, fullText, provider, model);
+                } catch (Exception e) {
+                        log.error("finalizeStream failed for conversation {} — sending best-effort done anyway",
+                                        conversation.getId(), e);
+                        // Best-effort: the assistant text was generated successfully even
+                        // though bookkeeping (save/wallet) had an issue. Tell the client
+                        // it's done so the UI keeps + commits what was streamed, instead
+                        // of silently tearing the connection down.
+                        Map<String, Object> done = new HashMap<>();
+                        done.put("conversationId", conversation.getId());
+                        done.put("title", conversation.getTitle());
+                        done.put("totalTokens", estimateTokens(fullText));
+                        safeSend(emitter, "done", done);
+                        completeEmitter(emitter, conversation.getId());
+                }
         }
 
         private void finalizeStream(SseEmitter emitter, User user, Conversation conversation, String fullText,
@@ -637,9 +830,9 @@ public class ChatServiceImpl implements ChatService {
                 try {
                         walletService.consumeTokens(user.getId(), trackAiTokens, FeatureType.CHAT, "AI Chat Request");
                 } catch (InsufficientTokensException e) {
-                        saveAssistantMessage(conversation.getId(), response);
-                        conversation.setUpdatedAt(LocalDateTime.now());
-                        conversationRepository.save(conversation);
+                        // Message is still saved even when tokens run out mid-generation.
+                        saveAssistantMessageSafely(conversation.getId(), response);
+                        bumpConversationUpdatedAtSafely(conversation);
 
                         Map<String, Object> done = new HashMap<>();
                         done.put("conversationId", conversation.getId());
@@ -657,9 +850,13 @@ public class ChatServiceImpl implements ChatService {
                         return;
                 }
 
-                saveAssistantMessage(conversation.getId(), response);
-                conversation.setUpdatedAt(LocalDateTime.now());
-                conversationRepository.save(conversation);
+                // FIX: saving the assistant's message must never be skipped —
+                // this is the actual answer. It's separated from the
+                // "updatedAt" bump below (which is best-effort / cosmetic)
+                // so a failure bumping updatedAt can never cost us the
+                // message itself.
+                saveAssistantMessageSafely(conversation.getId(), response);
+                bumpConversationUpdatedAtSafely(conversation);
 
                 Wallet wallet = walletService.getWalletByUserId(user.getId());
 
@@ -671,6 +868,39 @@ public class ChatServiceImpl implements ChatService {
 
                 emitter.send(SseEmitter.event().name("done").data(objectMapper.writeValueAsString(done)));
                 emitter.complete();
+        }
+
+        private void saveAssistantMessageSafely(String conversationId, ChatResponse response) {
+                try {
+                        saveAssistantMessage(conversationId, response);
+                } catch (Exception e) {
+                        log.error("CRITICAL: failed to save assistant message for conversation {}",
+                                        conversationId, e);
+                }
+        }
+
+        // FIX (root-cause #1, targeted update): no longer re-saves the whole
+        // `conversation` entity (which raced with generateTitleAsync's
+        // save). Uses a narrow UPDATE, and any failure here is logged but
+        // never propagated — it's just the "last activity" timestamp, not
+        // user-visible content.
+        //
+        // Add this method to ConversationRepository if missing:
+        //
+        // @Modifying
+        // @Query("UPDATE Conversation c SET c.updatedAt = :updatedAt WHERE c.id = :id")
+        // int updateTimestamp(@Param("id") String id, @Param("updatedAt") LocalDateTime
+        // updatedAt);
+        //
+        private void bumpConversationUpdatedAtSafely(Conversation conversation) {
+                try {
+                        LocalDateTime now = LocalDateTime.now();
+                        conversationRepository.updateTimestamp(conversation.getId(), now);
+                        conversation.setUpdatedAt(now);
+                } catch (Exception e) {
+                        log.warn("Failed to bump updatedAt for conversation {} (non-fatal): {}",
+                                        conversation.getId(), e.getMessage());
+                }
         }
 
         private void sendErrorAndComplete(SseEmitter emitter, String code, String message) {
