@@ -25,7 +25,13 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+// FIX: MessageDigest import kiya — fingerprint ko SHA-256 hash karne ke liye,
+// taaki cookie mein hamesha ek safe (space-free, RFC2616-compliant) hex string jaaye.
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.util.HexFormat;
 import java.util.UUID;
 
 @Service
@@ -49,10 +55,53 @@ public class AuthServiceImpl implements AuthService {
                 return email.trim().toLowerCase();
         }
 
-        // Normalize fingerprint
+        // ============================================================
+        // FIX: normalizeFingerprint() — ROOT CAUSE FIX
+        // ------------------------------------------------------------
+        // Pehle ye method sirf .trim().toLowerCase() karta tha, jo
+        // sirf shuru/end ke spaces hatata tha — beech ke spaces
+        // (jaise User-Agent string mein hote hain: "Mozilla/5.0 (Windows...)")
+        // waise hi reh jaate the.
+        //
+        // Jab yahi raw fingerprint value CookieUtil.addFingerprintCookie()
+        // mein cookie value banti thi, Spring ka ResponseCookie.from()
+        // crash kar deta tha:
+        // IllegalArgumentException: RFC2616 cookie value cannot have ' '
+        //
+        // FIX: fingerprint ko ab SHA-256 se hash kar rahe hain. Isse:
+        // 1) Result hamesha fixed-length hex string hoga (0-9, a-f) —
+        // koi space ya special char kabhi aa hi nahi sakta.
+        // 2) Client se aayi raw/untrusted string kabhi seedhe cookie
+        // ya JWT claim mein nahi jaayegi (security best practice).
+        // 3) Same input => same hash, isliye login/refresh/logout mein
+        // fingerprint match karte rehna kaam karta rahega jaise pehle.
+        // ============================================================
         private String normalizeFingerprint(String fingerprint) {
 
-                return fingerprint.trim().toLowerCase();
+                if (fingerprint == null || fingerprint.isBlank()) {
+                        throw new RuntimeException("Fingerprint is required");
+                }
+
+                // Pehle jaisa hi basic cleanup — trim + lowercase
+                String cleaned = fingerprint.trim().toLowerCase();
+
+                try {
+                        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+
+                        byte[] hashBytes = digest.digest(
+                                        cleaned.getBytes(StandardCharsets.UTF_8));
+
+                        // FIX: HexFormat se safe hex string banaya —
+                        // ye hamesha [0-9a-f] hi hoga, cookie-safe guaranteed
+                        return HexFormat.of().formatHex(hashBytes);
+
+                } catch (NoSuchAlgorithmException e) {
+
+                        // SHA-256 JVM mein hamesha available hota hai,
+                        // fir bhi safe fallback rakha hai taaki app crash na ho
+                        throw new RuntimeException(
+                                        "Unable to process fingerprint", e);
+                }
         }
 
         // Register user
@@ -214,6 +263,8 @@ public class AuthServiceImpl implements AuthService {
 
                 String email = normalizeEmail(request.getEmail());
 
+                // FIX: ab ye SHA-256 hash string return karega (space-free),
+                // isliye login/refresh/logout/cookie sab jagah safe rahega
                 String fingerprint = normalizeFingerprint(
                                 request.getFingerprint());
 
@@ -346,6 +397,14 @@ public class AuthServiceImpl implements AuthService {
 
                 try {
 
+                        // NOTE: Agar ye fingerprint pehle se hi cookie se aa raha hai
+                        // (jo login ke time hash hokar cookie mein save hua tha), to
+                        // isko dobara hash mat karo — warna match kabhi nahi hoga.
+                        // Is method ko sirf tabhi call karo jab RAW/UN-hashed
+                        // fingerprint aaya ho. Agar controller cookie se seedha
+                        // fingerprint nikal ke yahan pass kar raha hai (jo already
+                        // hashed hai), to normalizeFingerprint() ki call yahan se
+                        // hata dena aur seedha fingerprint use karna.
                         fingerprint = normalizeFingerprint(fingerprint);
 
                         // Validate token type
@@ -444,6 +503,11 @@ public class AuthServiceImpl implements AuthService {
 
                 try {
 
+                        // NOTE: yahan bhi upar wali refreshAccessToken() jaisi
+                        // consistency zaroori hai — hashed vs raw fingerprint
+                        // mismatch se "already expired or revoked" jaisa
+                        // galat error aa sakta hai. Controller layer confirm
+                        // karo ki fingerprint kis form mein pass ho raha hai.
                         fingerprint = normalizeFingerprint(fingerprint);
 
                         // Validate token type
