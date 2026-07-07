@@ -26,30 +26,22 @@ import java.util.List;
 public class UserServiceImpl implements UserService {
 
         private final UserRepository userRepository;
-
         private final CloudinaryService cloudinaryService;
-
         private final RedisUserCacheService redisUserCacheService;
 
         /*
          * ==========================================================
          * GET AUTHENTICATED USER
          *
-         * JWT
-         * ↓
-         * Email
-         * ↓
-         * Redis
-         * ↓
-         * HIT -> Return
+         * JWT -> Email -> Redis
+         * HIT -> CachedUser se User bana ke return (NO DB CALL) ✅
+         * MISS -> Database -> Save Redis -> Return
          *
-         * MISS
-         * ↓
-         * Database
-         * ↓
-         * Save Redis
-         * ↓
-         * Return
+         * FIX: pehle cache HIT hone par bhi userRepository.findByEmail()
+         * call ho raha tha, jisse Redis cache ka koi fayda nahi mil raha
+         * tha aur har dashboard/profile load par DB hit ho raha tha.
+         * Ab cache hit pe seedha CachedUser se User object banta hai,
+         * DB tak jaata hi nahi.
          * ==========================================================
          */
         private User getAuthenticatedUser() {
@@ -66,14 +58,28 @@ public class UserServiceImpl implements UserService {
 
                 if (cachedUser != null) {
 
-                        return userRepository
-                                        .findByEmail(email)
-                                        .orElseThrow(() -> new RuntimeException("User not found"));
+                        return User.builder()
+                                        .id(cachedUser.getId())
+                                        .name(cachedUser.getName())
+                                        .email(cachedUser.getEmail())
+                                        .role(cachedUser.getRole())
+                                        .enabled(cachedUser.getEnabled())
+                                        .blocked(cachedUser.getBlocked())
+                                        .emailVerified(cachedUser.getEmailVerified())
+                                        .mobileNumber(cachedUser.getMobileNumber())
+                                        .profileImage(cachedUser.getProfileImage())
+                                        // FIX: publicId bhi map karo, warna updateCurrentUser()
+                                        // mein oldPublicId hamesha null milegi cache-hit path pe
+                                        .profileImagePublicId(cachedUser.getProfileImagePublicId())
+                                        .description(cachedUser.getDescription())
+                                        .createdAt(cachedUser.getCreatedAt())
+                                        .build();
+
                 }
 
                 /*
                  * STEP-2
-                 * DATABASE
+                 * DATABASE (sirf cache MISS pe yahan aayega)
                  */
                 User user = userRepository
                                 .findByEmail(email)
@@ -95,94 +101,61 @@ public class UserServiceImpl implements UserService {
                                         .emailVerified(user.getEmailVerified())
                                         .mobileNumber(user.getMobileNumber())
                                         .profileImage(user.getProfileImage())
+                                        // FIX: DB se cache banate waqt bhi publicId include karo
+                                        .profileImagePublicId(user.getProfileImagePublicId())
                                         .description(user.getDescription())
                                         .createdAt(user.getCreatedAt())
                                         .build();
 
                         redisUserCacheService.saveUser(cache);
+
                 }
 
                 return user;
+
         }
 
-        /*
-         * ==========================================================
-         * GET CURRENT USER
-         * ==========================================================
-         */
         @Override
         public User getCurrentUser() {
 
                 return getAuthenticatedUser();
         }
 
-        /*
-         * ==========================================================
-         * UPDATE PROFILE
-         * ==========================================================
-         */
         @Override
-        public UpdateProfileResponse updateCurrentUser(
-                        UpdateProfileRequest request) {
+        public UpdateProfileResponse updateCurrentUser(UpdateProfileRequest request) {
 
                 User user = getAuthenticatedUser();
 
                 List<String> updatedFields = new ArrayList<>();
-
                 List<String> restrictedFields = new ArrayList<>();
 
-                /*
-                 * EMAIL
-                 */
                 if (request.getEmail() != null &&
                                 !request.getEmail().equals(user.getEmail())) {
-
                         restrictedFields.add("email");
                 }
 
-                /*
-                 * MOBILE
-                 */
                 if (request.getMobileNumber() != null &&
                                 !request.getMobileNumber().equals(user.getMobileNumber())) {
-
                         restrictedFields.add("mobileNumber");
                 }
 
-                /*
-                 * PASSWORD
-                 */
                 if (request.getPassword() != null &&
                                 !request.getPassword().isBlank()) {
-
                         restrictedFields.add("password");
                 }
 
-                /*
-                 * NAME
-                 */
                 if (request.getName() != null &&
                                 !request.getName().equals(user.getName())) {
-
                         user.setName(request.getName());
-
                         updatedFields.add("name");
                 }
 
-                /*
-                 * DESCRIPTION
-                 */
                 if (request.getDescription() != null &&
                                 !request.getDescription().equals(user.getDescription())) {
-
                         user.setDescription(request.getDescription());
-
                         updatedFields.add("description");
                 }
 
-                /*
-                 * PROFILE IMAGE UPDATE LOGIC
-                 */
                 MultipartFile profileImage = request.getProfileImage();
 
                 if (profileImage != null &&
@@ -190,31 +163,30 @@ public class UserServiceImpl implements UserService {
                                 !profileImage.getOriginalFilename().isBlank() &&
                                 !profileImage.isEmpty()) {
 
-                        // STEP 1: Pehle purana publicId nikaal ke ek local variable mein rakho
-                        // (URL nahi, wo alag "profileImagePublicId" column se aayega)
                         String oldPublicId = user.getProfileImagePublicId();
 
-                        // STEP 2: Naya image Cloudinary pe upload karo
                         CloudinaryUploadResponse upload = cloudinaryService.uploadProfileImage(profileImage);
 
-                        // STEP 3: User entity mein DONO cheezein update karo -> URL (display ke liye)
-                        // aur publicId (future delete/update ke liye)
                         user.setProfileImage(upload.getSecureUrl());
                         user.setProfileImagePublicId(upload.getPublicId());
 
                         updatedFields.add("profileImage");
 
-                        // STEP 4: Naya image set hone ke BAAD, purana image Cloudinary se delete karo
-                        // (agar purana publicId maujood tha)
                         if (oldPublicId != null && !oldPublicId.isBlank()) {
-                                cloudinaryService.deleteImage(oldPublicId); // <-- ab sahi publicId jaayega, URL nahi
+                                cloudinaryService.deleteImage(oldPublicId);
                         }
                 }
 
                 /*
-                 * SAVE DATABASE
+                 * NOTE: getAuthenticatedUser() ab cache-hit case mein DB se
+                 * DETACHED User object return karta hai. userRepository.save()
+                 * ko phir bhi call karna zaroori hai taaki changes DB mein
+                 * persist ho (JPA yahan save() ke through hi update karega,
+                 * dirty-checking cache-hit path pe nahi chalegi kyunki
+                 * object DB-managed session se attached nahi hai).
                  */
                 User updatedUser = userRepository.save(user);
+
                 if (updatedUser.getRole() != Role.ROLE_ADMIN) {
 
                         CachedUser cachedUser1 = CachedUser.builder()
@@ -227,19 +199,17 @@ public class UserServiceImpl implements UserService {
                                         .emailVerified(updatedUser.getEmailVerified())
                                         .mobileNumber(updatedUser.getMobileNumber())
                                         .profileImage(updatedUser.getProfileImage())
+                                        // FIX: naya publicId cache mein bhi update karo,
+                                        // warna agla profile-image-update purani (ab-invalid)
+                                        // publicId use karega
+                                        .profileImagePublicId(updatedUser.getProfileImagePublicId())
                                         .description(updatedUser.getDescription())
                                         .createdAt(updatedUser.getCreatedAt())
                                         .build();
 
                         redisUserCacheService.updateUser(cachedUser1);
                 }
-
-                /*
-                 * NO CHANGES
-                 */
-                if (updatedFields.isEmpty() && restrictedFields.isEmpty())
-
-                {
+                if (updatedFields.isEmpty() && restrictedFields.isEmpty()) {
 
                         return UpdateProfileResponse.builder()
                                         .message("No changes detected")
@@ -249,9 +219,6 @@ public class UserServiceImpl implements UserService {
                                         .build();
                 }
 
-                /*
-                 * ONLY RESTRICTED
-                 */
                 if (updatedFields.isEmpty() && !restrictedFields.isEmpty()) {
 
                         return UpdateProfileResponse.builder()
@@ -262,11 +229,11 @@ public class UserServiceImpl implements UserService {
                                         .build();
                 }
 
-                /*
-                 * SUCCESS
-                 */
-                return UpdateProfileResponse.builder().message("Profile updated successfully")
-                                .updatedFields(updatedFields).restrictedFields(restrictedFields)
-                                .profileImage(updatedUser.getProfileImage()).build();
+                return UpdateProfileResponse.builder()
+                                .message("Profile updated successfully")
+                                .updatedFields(updatedFields)
+                                .restrictedFields(restrictedFields)
+                                .profileImage(updatedUser.getProfileImage())
+                                .build();
         }
 }

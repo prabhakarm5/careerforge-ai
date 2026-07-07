@@ -3,12 +3,14 @@ package com.trackai.backend.service.impl;
 import com.trackai.backend.dto.ActionResponse;
 import com.trackai.backend.dto.UpdateProfileRequest;
 import com.trackai.backend.dto.UpdateProfileResponse;
+import com.trackai.backend.dto.cache.CachedUser;
 import com.trackai.backend.dto.cloudinary.CloudinaryUploadResponse;
 import com.trackai.backend.entity.User;
 import com.trackai.backend.enums.Role;
 import com.trackai.backend.repository.UserRepository;
 import com.trackai.backend.service.AdminService;
 import com.trackai.backend.service.CloudinaryService;
+import com.trackai.backend.service.RedisUserCacheService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -27,6 +29,13 @@ public class AdminServiceImpl
         private final UserRepository userRepository;
 
         private final CloudinaryService cloudinaryService;
+
+        // FIX: RedisUserCacheService inject kiya taaki admin ke har
+        // action (enable/disable/block/unblock/delete) ke baad user ka
+        // stale Redis cache turant clear ho jaaye. Warna blocked/disabled
+        // user apna purana cached (enabled=true, blocked=false) data
+        // TTL expire hone tak (30 min) use karta rehta.
+        private final RedisUserCacheService redisUserCacheService;
 
         // GET ALL USERS
         @Override
@@ -104,6 +113,10 @@ public class AdminServiceImpl
 
                 userRepository.save(user);
 
+                // FIX: cache evict — is user ka agla request fresh DB
+                // data se cache refresh karega (enabled = true dikhega)
+                redisUserCacheService.deleteUser(user.getEmail());
+
                 return ActionResponse.builder()
 
                                 .message(
@@ -164,6 +177,10 @@ public class AdminServiceImpl
 
                 userRepository.save(user);
 
+                // FIX: cache evict — warna disabled user 30 min tak
+                // enabled=true wale purane cache ke sath system use kar sakta hai
+                redisUserCacheService.deleteUser(user.getEmail());
+
                 return ActionResponse.builder()
 
                                 .message(
@@ -223,6 +240,11 @@ public class AdminServiceImpl
                 user.setBlocked(true);
 
                 userRepository.save(user);
+
+                // FIX: sabse critical evict — security issue tha isi ke bina.
+                // Blocked user ka access token abhi bhi valid rehta agar
+                // cache HIT hota rehta with blocked=false
+                redisUserCacheService.deleteUser(user.getEmail());
 
                 return ActionResponse.builder()
 
@@ -299,6 +321,9 @@ public class AdminServiceImpl
 
                 userRepository.save(user);
 
+                // FIX: cache evict
+                redisUserCacheService.deleteUser(user.getEmail());
+
                 return ActionResponse.builder()
 
                                 .message(
@@ -332,8 +357,16 @@ public class AdminServiceImpl
                                         "Admin account cannot be deleted");
                 }
 
+                // Email ko delete se PEHLE nikaal lo, warna user.delete()
+                // ke baad user object stale ho sakta hai kuch JPA setups mein
+                String email = user.getEmail();
+
                 // DELETE USER
                 userRepository.delete(user);
+
+                // FIX: deleted user ka cache bhi hatao, warna deleted user
+                // "authenticated" dikhta rehta hai jab tak TTL expire na ho
+                redisUserCacheService.deleteUser(email);
 
                 return ActionResponse.builder()
 
@@ -347,7 +380,7 @@ public class AdminServiceImpl
                                                 user.getId())
 
                                 .userEmail(
-                                                user.getEmail())
+                                                email)
 
                                 .status(true)
 
@@ -470,6 +503,12 @@ public class AdminServiceImpl
 
                 // SAVE ADMIN
                 userRepository.save(admin);
+
+                // NOTE: Admin ROLE_ADMIN hone ki wajah se
+                // RedisUserCacheServiceImpl.saveUser() mein already
+                // skip ho jaata hai (log: "Admin user not cached").
+                // Isliye yahan evict call ki koi zarurat nahi —
+                // admin kabhi cache mein jaata hi nahi.
 
                 return UpdateProfileResponse.builder()
 

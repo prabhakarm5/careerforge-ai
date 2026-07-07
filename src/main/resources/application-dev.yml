@@ -1,0 +1,123 @@
+# =====================================================================
+# application-dev.yml — DEV profile ONLY
+# =====================================================================
+# Everything shared with prod (Cloudinary, Groq, OpenRouter, Razorpay,
+# JWT/OTP expiry, rate-limits, token costs) now lives in
+# application-common.yml. This file only holds things that genuinely
+# differ locally: DB pool, SQL echo, actuator verbosity, dev-only tools
+# (ngrok), and logging.
+# =====================================================================
+
+server:
+  port: ${SERVER_PORT:9092}
+  shutdown: graceful
+  compression:
+    enabled: true
+    min-response-size: 1024
+    mime-types:
+      - application/json
+      - text/html
+      - text/plain
+
+spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      validation-timeout: 5000
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: update           # Dev only — auto-updates schema from entities
+    show-sql: false              # Dev only — see generated SQL in console
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+  thymeleaf:
+    check-template-location: false
+
+  web:
+    resources:
+      add-mappings: false
+
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 8MB
+      max-request-size: 10MB
+
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
+  data:
+    redis:
+      host: ${UPSTASH_REDIS_HOST}
+      port: ${UPSTASH_REDIS_PORT}
+      password: ${UPSTASH_REDIS_TOKEN}
+      ssl:
+        enabled: true
+      timeout: 5s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+  health:
+    redis:
+      enabled: true
+    db:
+      enabled: true
+
+# =========================================
+# NGROK — Local Tunneling (DEV ONLY)
+# =========================================
+# Exposes localhost so Razorpay's webhook can reach your machine while
+# testing locally. No purpose in prod — not in application-prod.yml.
+ngrok:
+  authtoken: ${NGROK_AUTH_TOKEN}
+
+# =========================================
+# LOGGING — Verbose, for local debugging
+# =========================================
+logging:
+  level:
+    root: INFO
+    com.trackai: DEBUG
+    org.springframework: INFO
+    org.hibernate.SQL: off
+  file:
+    name: logs/trackai.log
+    # FIX: previously written as a broken nested block ("file:" then a
+    # second unindented "name:" under logging.level) — that is invalid
+    # YAML structure and either fails to parse or silently keeps only
+    # the last value. "logging.file.name" must be its own sibling key
+    # under "logging", exactly as above.

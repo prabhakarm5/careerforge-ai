@@ -1,0 +1,353 @@
+# =====================================================================
+# application-common.yml — Shared config, IDENTICAL across dev & prod
+# =====================================================================
+# Rule of thumb used to decide what lives here vs in dev/prod:
+#   - Business logic, third-party API config, token economics, rate
+#     limits, JWT/OTP expiries -> HERE (product behavior must not
+#     silently change based on environment).
+#   - Infra/runtime concerns (DB URL pooling values already differ per
+#     env in practice via Neon branch, logging verbosity, show-sql,
+#     ddl-auto, actuator detail level) -> stay in application-dev.yml /
+#     application-prod.yml.
+#
+# Loaded via application.yml's `spring.config.import`. Values here are
+# overridden by whichever profile file is active if the SAME key is
+# redeclared there (profile-specific always wins over common).
+# =====================================================================
+
+# =========================================
+# CUSTOM APP SETTINGS
+# =========================================
+app:
+
+  frontend-url: ${FRONTEND_URL}
+
+  # ---------------------------------------
+  # WALLET
+  # ---------------------------------------
+  wallet:
+    initial-tokens: 100           # New user signup default token balance
+
+  # ---------------------------------------
+  # ADMIN USER — auto-created on first startup
+  # ---------------------------------------
+  default-admin:
+    email: ${ADMIN_EMAIL}
+    password: ${ADMIN_PASSWORD}
+    mobile: ${ADMIN_MOBILE}
+    name: ${ADMIN_NAME:Super Admin}
+
+  # ---------------------------------------
+  # MAIL SETTINGS
+  # ---------------------------------------
+  mail:
+    from-name: TrackAI Security Team
+    verification-expiry-minutes: 15
+    resend-wait-minutes: 1
+
+  # ---------------------------------------
+  # JWT TOKENS
+  # ---------------------------------------
+  jwt:
+    secret: ${JWT_SECRET}
+    access-token-expiry: 15m
+    refresh-token-expiry: 7d
+
+  # ---------------------------------------
+  # ADMIN SESSION
+  # ---------------------------------------
+  admin:
+    access-token-expiry: 10m
+    refresh-token-expiry: 1d
+    absolute-session-expiry: 1d
+
+  # ---------------------------------------
+  # OTP SETTINGS
+  # ---------------------------------------
+  otp:
+    expiry-minutes: 5
+    resend-wait-minutes: 2
+
+  forgot-password:
+    otp-expiry-minutes: 5
+    resend-wait-minutes: 2
+
+  # ---------------------------------------
+  # RATE LIMITING (Token Bucket per endpoint)
+  # Format: capacity = max burst, refill = tokens/minute
+  # ---------------------------------------
+  rate-limit:
+
+    # --- Auth Endpoints ---
+    login:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+    register:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+    logout:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+    refresh-token:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+
+    # --- Email Verification ---
+    resend-verification-email:
+      capacity: 3
+      refill-tokens: 3
+      refill-minutes: 1
+    verify-token:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    # --- Forgot Password Flow ---
+    forgot-password:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+    verify-forgot-password-otp:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+    resend-forgot-password-otp:
+      capacity: 3
+      refill-tokens: 3
+      refill-minutes: 1
+    reset-password:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    # --- Admin Endpoints ---
+    admin-login:
+      capacity: 3
+      refill-tokens: 3
+      refill-minutes: 1
+    verify-admin-otp:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+    resend-admin-otp:
+      capacity: 3
+      refill-tokens: 3
+      refill-minutes: 1
+
+    # --- AI Features ---
+    chat:
+      capacity: 20
+      refill-tokens: 20
+      refill-minutes: 1
+    image:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+    vision:
+      capacity: 15
+      refill-tokens: 15
+      refill-minutes: 1
+    pdf:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+    website-generator:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+    # --- Payments ---
+    create-order:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+    verify-payment:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+    payment-history:
+      capacity: 50
+      refill-tokens: 50
+      refill-minutes: 1
+
+    # --- Plans (Admin) ---
+    create-plan:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+    get-plans:
+      capacity: 100
+      refill-tokens: 100
+      refill-minutes: 1
+    update-plan:
+      capacity: 10
+      refill-tokens: 10
+      refill-minutes: 1
+    delete-plan:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+
+  # ---------------------------------------
+  # COOKIE SETTINGS — sab auth cookies (access, refresh, fingerprint)
+  # yahi se control hoga, controller/util mein kahin bhi hardcode nahi
+  #
+  # ✅ FIX — pehle ye block "app:" ke bahar, top-level "cookie:" ban gaya
+  # tha (galat indentation ki wajah se) — isliye Spring ko property
+  # "app.cookie.refresh-token-name" milti hi nahi thi, sirf
+  # "cookie.refresh-token-name" milti thi -> app start hi nahi ho raha
+  # tha (UnsatisfiedDependencyException on CookieUtil bean). Ab "app:"
+  # ke andar, sahi 2-space indent ke saath.
+  #
+  # ✅ FIX — path "/api/auth" se "/" kar diya. Access-token cookie sirf
+  # login/refresh response mein set hoti hai, lekin usko READ har ek
+  # protected request pe (JwtAuthenticationFilter jaisa filter, jo
+  # /api/chat, /api/wallet, /api/users, etc. sab pe chalta hai) karna
+  # padta hai. Cookie ka "path" attribute browser ko batata hai ki
+  # cookie kis URL-prefix ke requests ke saath bhejni hai — agar
+  # "/api/auth" rakhte to browser sirf /api/auth/** calls ke saath
+  # cookie bhejta, baaki sab jagah (chat, wallet, user profile) cookie
+  # missing milti aur wo saare authenticated calls 401 dete.
+  # ---------------------------------------
+  cookie:
+    refresh-token-name: refreshToken
+    access-token-name: accessToken
+    fingerprint-name: fingerprint
+    path: /
+    same-site: Strict
+    secure: true
+
+# =========================================
+# CLOUDINARY — Media Storage
+# =========================================
+cloudinary:
+  cloud-name: ${CLOUDINARY_CLOUD_NAME}
+  api-key: ${CLOUDINARY_API_KEY}
+  api-secret: ${CLOUDINARY_API_SECRET}
+
+# =========================================
+# GROQ AI — LLM Inference (Multi-Model)
+# =========================================
+# Frontend model dropdown is populated from this list (/api/chat/models).
+# Only models with vision: true should allow image attachments.
+# Confirm available models in the Groq console before changing this list.
+# =========================================
+groq:
+  api-key: ${GROQ_API_KEY}
+  url: https://api.groq.com/openai/v1/chat/completions
+  default-model: llama-3.3-70b-versatile
+  max-tokens: 8192
+  models:
+    - id: llama-3.3-70b-versatile
+      label: "Llama 3.3 70B"
+      description: "Balanced model for general chat, coding help, and long-form answers"
+      vision: false
+    - id: llama-3.1-8b-instant
+      label: "Llama 3.1 8B (Fast)"
+      description: "Fast model for short questions and quick replies"
+      vision: false
+    - id: llama-3.2-90b-vision-preview
+      label: "Llama 3.2 90B Vision"
+      description: "Vision model for understanding photos, screenshots, and diagrams"
+      vision: true
+    - id: llama-3.2-11b-vision-preview
+      label: "Llama 3.2 11B Vision (Fast)"
+      description: "Fast vision model for lightweight image understanding tasks"
+      vision: true
+    - id: deepseek-r1-distill-llama-70b
+      label: "DeepSeek R1 Distill 70B"
+      description: "Deep reasoning model for step-by-step problem solving"
+      vision: false
+    - id: openai/gpt-oss-20b
+      label: "GPT-OSS 20B"
+      description: "Open-weight model for balanced general use"
+      vision: false
+    - id: openai/gpt-oss-120b
+      label: "GPT-OSS 120B"
+      description: "Larger open-weight model for more demanding tasks"
+      vision: false
+
+# =========================================
+# OPENROUTER — Chat and Image Models
+# =========================================
+openrouter:
+  api-key: ${OPENROUTER_API_KEY}
+  base-url: https://openrouter.ai/api/v1
+  chat-endpoint: /chat/completions
+  chat-model: nvidia/nemotron-3-ultra-550b-a55b:free
+  chat-models:
+    - id: nvidia/nemotron-3-ultra-550b-a55b:free
+      label: "OpenRouter - Nemotron 3 Ultra"
+      description: "Free reasoning-focused text model for general chat and long-form answers."
+      vision: false
+      type: chat
+    - id: cohere/north-mini-code:free
+      label: "OpenRouter - North Mini Code"
+      description: "Free coding-focused text model for programming, debugging, and technical help."
+      vision: false
+      type: chat
+    - id: nvidia/nemotron-3.5-content-safety:free
+      label: "OpenRouter - Nemotron Content Safety"
+      description: "Free safety and moderation-oriented text/vision model for testing guardrail flows."
+      vision: true
+      type: chat
+    - id: z-ai/glm-5.2
+      label: "OpenRouter - GLM 5.2"
+      description: "Long-context reasoning model for complex planning, coding, and agent-style tasks."
+      vision: false
+      type: chat
+    - id: moonshotai/kimi-k2.7-code
+      label: "OpenRouter - Kimi K2.7 Code"
+      description: "Coding-focused model for end-to-end software tasks and repository-level help."
+      vision: true
+      type: chat
+    - id: google/gemma-4-31b-it:free
+      label: "OpenRouter - Gemma 4 31B IT"
+      description: "Multi-model router that can deliberate across models for broad research-style prompts."
+      vision: true
+      type: chat
+  image-endpoint: /images
+  image-model: google/gemini-3.1-flash-lite-image
+  image-models:
+    - id: google/gemini-3.1-flash-lite-image
+      label: "OpenRouter Image - Gemini 3.1 Flash Lite"
+      description: "Fast, lower-cost image generation and lightweight image editing."
+      vision: true
+      type: image
+    - id: google/gemini-3.1-flash-image
+      label: "OpenRouter Image - Gemini 3.1 Flash"
+      description: "Balanced image generation and editing with stronger visual quality."
+      vision: true
+      type: image
+    - id: google/gemini-3-pro-image
+      label: "OpenRouter Image - Gemini 3 Pro"
+      description: "Advanced image generation and editing model for higher-quality visual outputs."
+      vision: true
+      type: image
+  timeout: 120
+  referer: ${FRONTEND_URL}
+  title: TrackAI
+
+# =========================================
+# RAZORPAY — Payment Gateway
+# =========================================
+razorpay:
+  key-id: ${RAZORPAY_KEY_ID}
+  key-secret: ${RAZORPAY_KEY_SECRET}
+  webhook-secret: ${RAZORPAY_WEBHOOK_SECRET}
+
+# =========================================
+# TOKEN COSTS PER FEATURE (TrackAI Wallet)
+# =========================================
+trackai:
+  tokens:
+    chat: 10
+    image: 200
+    resume: 100
+    website: 500
+    pdf: 50
+    audio: 80

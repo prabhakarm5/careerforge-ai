@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.trackai.backend.config.GroqModelConfig;
 import com.trackai.backend.config.RateLimitProperties;
 import com.trackai.backend.dto.RateLimitResponse;
+import com.trackai.backend.dto.cache.CachedConversation;
+import com.trackai.backend.dto.cache.CachedUser;
 import com.trackai.backend.dto.chat.ChatResponse;
 import com.trackai.backend.dto.chat.SendMessageRequest;
 import com.trackai.backend.dto.groq.GroqMessage;
@@ -20,7 +22,10 @@ import com.trackai.backend.repository.UserRepository;
 import com.trackai.backend.service.ChatService;
 import com.trackai.backend.service.GroqService;
 import com.trackai.backend.service.OpenRouterChatService;
+import com.trackai.backend.service.RedisChatMemoryCacheService;
+import com.trackai.backend.service.RedisConversationCacheService;
 import com.trackai.backend.service.RedisRateLimitService;
+import com.trackai.backend.service.RedisUserCacheService;
 import com.trackai.backend.service.WalletService;
 
 import jakarta.annotation.PreDestroy;
@@ -66,6 +71,23 @@ public class ChatServiceImpl implements ChatService {
         private final MemoryRetrievalService memoryRetrievalService;
         private final ObjectMapper objectMapper;
 
+        // User cache (already existed)
+        private final RedisUserCacheService redisUserCacheService;
+
+        // FIX (naya): conversation metadata ka WRITE-THROUGH cache —
+        // findById() ka DB hit chat ke hottest path (sendMessage,
+        // streamMessage) mein har baar hota tha existing conversation
+        // ke liye. Ab cache-first.
+        private final RedisConversationCacheService redisConversationCacheService;
+
+        // FIX (naya): chat memory (last 20 messages) ka Redis LIST-based
+        // write-through cache. Ye sabse zyada faayda dega — pehle
+        // buildConversationMemory() HAR message pe ek
+        // findByConversationIdOrderByCreatedAtDesc query chalata tha,
+        // jo ab sirf cache-miss (naya conversation / 2hr inactivity)
+        // ke case mein hi chalega.
+        private final RedisChatMemoryCacheService redisChatMemoryCacheService;
+
         private final ThreadPoolTaskExecutor streamExecutor;
 
         private static final Duration STREAM_HEARTBEAT = Duration.ofSeconds(15);
@@ -92,7 +114,10 @@ public class ChatServiceImpl implements ChatService {
                         ConversationRepository conversationRepository,
                         ChatMessageRepository chatMessageRepository,
                         MemoryRetrievalService memoryRetrievalService,
-                        ObjectMapper objectMapper) {
+                        ObjectMapper objectMapper,
+                        RedisUserCacheService redisUserCacheService,
+                        RedisConversationCacheService redisConversationCacheService, // naya
+                        RedisChatMemoryCacheService redisChatMemoryCacheService) { // naya
 
                 this.groqService = groqService;
                 this.openRouterChatService = openRouterChatService;
@@ -105,6 +130,9 @@ public class ChatServiceImpl implements ChatService {
                 this.chatMessageRepository = chatMessageRepository;
                 this.memoryRetrievalService = memoryRetrievalService;
                 this.objectMapper = objectMapper;
+                this.redisUserCacheService = redisUserCacheService;
+                this.redisConversationCacheService = redisConversationCacheService;
+                this.redisChatMemoryCacheService = redisChatMemoryCacheService;
 
                 this.streamExecutor = new ThreadPoolTaskExecutor();
                 this.streamExecutor.setCorePoolSize(10);
@@ -219,10 +247,114 @@ public class ChatServiceImpl implements ChatService {
 
         // ===================== AUTH USER =====================
         private User getAuthenticatedUser() {
+
                 Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
                 String email = authentication.getName();
-                return userRepository.findByEmail(email)
+
+                CachedUser cachedUser = redisUserCacheService.getUser(email);
+
+                if (cachedUser != null) {
+
+                        return User.builder()
+                                        .id(cachedUser.getId())
+                                        .name(cachedUser.getName())
+                                        .email(cachedUser.getEmail())
+                                        .role(cachedUser.getRole())
+                                        .enabled(cachedUser.getEnabled())
+                                        .blocked(cachedUser.getBlocked())
+                                        .emailVerified(cachedUser.getEmailVerified())
+                                        .mobileNumber(cachedUser.getMobileNumber())
+                                        .profileImage(cachedUser.getProfileImage())
+                                        .profileImagePublicId(cachedUser.getProfileImagePublicId())
+                                        .description(cachedUser.getDescription())
+                                        .createdAt(cachedUser.getCreatedAt())
+                                        .build();
+                }
+
+                User user = userRepository.findByEmail(email)
                                 .orElseThrow(() -> new RuntimeException("User not found"));
+
+                if (user.getRole() != com.trackai.backend.enums.Role.ROLE_ADMIN) {
+
+                        CachedUser toCache = CachedUser.builder()
+                                        .id(user.getId())
+                                        .name(user.getName())
+                                        .email(user.getEmail())
+                                        .role(user.getRole())
+                                        .enabled(user.getEnabled())
+                                        .blocked(user.getBlocked())
+                                        .emailVerified(user.getEmailVerified())
+                                        .mobileNumber(user.getMobileNumber())
+                                        .profileImage(user.getProfileImage())
+                                        .profileImagePublicId(user.getProfileImagePublicId())
+                                        .description(user.getDescription())
+                                        .createdAt(user.getCreatedAt())
+                                        .build();
+
+                        redisUserCacheService.saveUser(toCache);
+                }
+
+                return user;
+        }
+
+        // ===================== CONVERSATION CACHE HELPERS =====================
+
+        // FIX (naya): Conversation entity -> CachedConversation, turant
+        // Redis mein WRITE-THROUGH save. Har jagah jahan conversation
+        // DB mein save/update hota hai, iske turant baad ye call hoga.
+        private void syncConversationCache(Conversation conversation) {
+
+                CachedConversation cached = CachedConversation.builder()
+                                .id(conversation.getId())
+                                .userId(conversation.getUserId())
+                                .title(conversation.getTitle())
+                                .featureType(conversation.getFeatureType() != null
+                                                ? conversation.getFeatureType().name()
+                                                : null)
+                                .archived(conversation.getArchived())
+                                .pinned(conversation.getPinned())
+                                .createdAt(conversation.getCreatedAt())
+                                .updatedAt(conversation.getUpdatedAt())
+                                .build();
+
+                redisConversationCacheService.saveConversation(cached);
+        }
+
+        // FIX (naya): cache-first conversation lookup. sendMessage() aur
+        // streamMessage() dono mein existing conversation fetch karne ke
+        // liye pehle ye call hoga, DB findById() sirf cache-MISS pe.
+        //
+        // NOTE: cache-hit case mein hum ek "detached" Conversation object
+        // bana rahe hain jo sirf read/data-carrier ki tarah use hoga
+        // (title/id/userId padhne ke liye). Isko dobara .save() mat
+        // karna DB overwrite se bachne ke liye — jahan bhi save() zaroori
+        // hai, wahan ye method use hi nahi hua, sirf reads mein hua hai.
+        private Conversation getConversationById(String conversationId) {
+
+                CachedConversation cached = redisConversationCacheService.getConversation(conversationId);
+
+                if (cached != null) {
+
+                        return Conversation.builder()
+                                        .id(cached.getId())
+                                        .userId(cached.getUserId())
+                                        .title(cached.getTitle())
+                                        .featureType(cached.getFeatureType() != null
+                                                        ? FeatureType.valueOf(cached.getFeatureType())
+                                                        : null)
+                                        .archived(cached.getArchived())
+                                        .pinned(cached.getPinned())
+                                        .createdAt(cached.getCreatedAt())
+                                        .updatedAt(cached.getUpdatedAt())
+                                        .build();
+                }
+
+                Conversation conversation = conversationRepository.findById(conversationId)
+                                .orElseThrow(() -> new RuntimeException("Conversation not found"));
+
+                syncConversationCache(conversation);
+
+                return conversation;
         }
 
         // ===================== TITLE =====================
@@ -234,23 +366,6 @@ public class ChatServiceImpl implements ChatService {
                 return trimmed.length() > 60 ? trimmed.substring(0, 60) + "..." : trimmed;
         }
 
-        // FIX (root-cause #1): this used to mutate + save the SAME
-        // `conversation` Java object that the main streaming thread also
-        // mutates + saves in finalizeStream() (setUpdatedAt). Two threads
-        // writing the same entity instance concurrently, each calling
-        // .save() independently, could stomp on each other's in-memory
-        // field changes and — depending on JPA dirty-checking/flush timing —
-        // throw or silently lose a write. Now this thread ONLY ever touches
-        // the `title` column, via a dedicated repository method that does a
-        // targeted UPDATE instead of re-saving the whole entity graph. It
-        // never shares mutable state with finalizeStream() anymore.
-        //
-        // Add this method to ConversationRepository if missing:
-        //
-        // @Modifying
-        // @Query("UPDATE Conversation c SET c.title = :title WHERE c.id = :id")
-        // int updateTitle(@Param("id") String id, @Param("title") String title);
-        //
         private void generateTitleAsync(Conversation conversation, String firstMessage, SseEmitter emitter) {
                 streamExecutor.execute(() -> {
                         try {
@@ -264,10 +379,11 @@ public class ChatServiceImpl implements ChatService {
                                 }
 
                                 conversationRepository.updateTitle(conversation.getId(), title);
-                                // keep the in-memory copy in sync for anything reading it
-                                // later in this same request lifecycle (best-effort only —
-                                // never re-persisted from here).
                                 conversation.setTitle(title);
+
+                                // FIX: WRITE-THROUGH — title DB mein update hote hi
+                                // cache bhi turant fresh title se refresh
+                                syncConversationCache(conversation);
 
                                 Map<String, Object> payload = new HashMap<>();
                                 payload.put("conversationId", conversation.getId());
@@ -292,7 +408,15 @@ public class ChatServiceImpl implements ChatService {
                                 .createdAt(LocalDateTime.now())
                                 .updatedAt(LocalDateTime.now())
                                 .build();
-                return conversationRepository.save(conversation);
+
+                Conversation saved = conversationRepository.save(conversation);
+
+                // FIX: naya conversation bana hi hai to turant cache mein
+                // bhi daal do — agli hi request (findById lookup) cache-hit
+                // paayegi
+                syncConversationCache(saved);
+
+                return saved;
         }
 
         // ===================== SAVE USER MESSAGE =====================
@@ -305,6 +429,13 @@ public class ChatServiceImpl implements ChatService {
                                 .createdAt(LocalDateTime.now())
                                 .build();
                 chatMessageRepository.save(chatMessage);
+
+                // FIX: WRITE-THROUGH — turant Redis list mein bhi push,
+                // taaki isi request ke andar chalne wali
+                // buildConversationMemory() ya agla message turant
+                // cache se serve ho, koi extra DB read na lage
+                redisChatMemoryCacheService.appendMessage(conversationId,
+                                new GroqMessage("user", message));
         }
 
         // ===================== SAVE ASSISTANT =====================
@@ -320,22 +451,58 @@ public class ChatServiceImpl implements ChatService {
                                 .createdAt(LocalDateTime.now())
                                 .build();
                 chatMessageRepository.save(chatMessage);
+
+                // FIX: WRITE-THROUGH — assistant ka reply bhi turant
+                // memory list mein push, taaki agla message isi
+                // conversation ka full fresh context Redis se hi paaye
+                redisChatMemoryCacheService.appendMessage(conversationId,
+                                new GroqMessage("assistant", response.getResponse()));
         }
 
         // ===================== MEMORY =====================
+        //
+        // FIX (sabse bada change): Pehle ye method HAR call pe seedha
+        // findByConversationIdOrderByCreatedAtDesc query chalata tha —
+        // aur ye method sendMessage() + streamMessage() dono mein, har
+        // single chat message pe call hoti hai. Chat sabse high-traffic
+        // path hai, isliye ye query sabse zyada DB load ka source thi.
+        //
+        // Ab REDIS-FIRST: Redis LIST (chat_memory:{conversationId}) mein
+        // hamesha last 20 messages write-through rehte hain (dekho
+        // saveUserMessage/saveAssistantMessage). Cache HIT ho to DB
+        // bilkul touch nahi hota. Cache sirf naya conversation ya 2hr+
+        // inactivity ke case mein MISS hota hai — tab hi ek baar DB se
+        // load karke hydrate kar dete hain, uske baad wapas cache-only.
         private List<GroqMessage> buildConversationMemory(String conversationId) {
+
+                // STEP-1: REDIS CHECK
+                List<GroqMessage> cached = redisChatMemoryCacheService.getMemory(conversationId);
+
+                if (cached != null) {
+                        // mutable copy — augmentWithRecalledContext() isme
+                        // add(0, ...) karta hai, isliye ArrayList zaroori hai
+                        return new ArrayList<>(cached);
+                }
+
+                // STEP-2: DATABASE (cache MISS)
                 List<ChatMessage> recentMessages = chatMessageRepository
                                 .findByConversationIdOrderByCreatedAtDesc(
                                                 conversationId, PageRequest.of(0, MAX_MEMORY_MESSAGES));
 
                 Collections.reverse(recentMessages);
 
-                return recentMessages
+                List<GroqMessage> messages = recentMessages
                                 .stream()
                                 .map(message -> new GroqMessage(
                                                 message.getRole().toLowerCase(),
                                                 message.getContent()))
                                 .collect(Collectors.toList());
+
+                // STEP-3: HYDRATE CACHE — agli baar isi conversation ke
+                // liye cache-hit milega
+                redisChatMemoryCacheService.hydrateMemory(conversationId, messages);
+
+                return messages;
         }
 
         // ===================== ON-DEMAND RAG =====================
@@ -385,26 +552,6 @@ public class ChatServiceImpl implements ChatService {
                                                 : requestedModel;
         }
 
-        // FIX (bhai's ask: "model choose kr ke fallback"): pehle ye method
-        // sirf OpenRouter ke available models ki list se "current model
-        // chhod ke pehla jo bhi mil jaaye" utha leta tha — is baat ki koi
-        // guarantee nahi thi ki wo naya model current conversation ko
-        // (uske context-size ke hisaab se) handle bhi kar payega ya nahi.
-        // Agar conversation bada tha aur fallback model ka context window
-        // chhota, wo turant ek ALAG reason (context overflow) se fail ho
-        // jaata, aur fallback chain bewajah lambi ho jaati.
-        //
-        // Ab: poori decision OpenRouterChatServiceImpl.pickFallbackModel()
-        // ko di gayi hai, jo current conversation (memory) ki estimated
-        // token size dekh kar sirf un models me se choose karta hai jinka
-        // context window use comfortably fit kar sake, aur unme se sabse
-        // bada context window wala model pick karta hai (safest bet).
-        // Isiliye ab memory bhi pass karna padta hai — sirf modelId kaafi
-        // nahi tha is decision ke liye.
-        //
-        // REQUIRED: OpenRouterChatService interface me ye method signature
-        // add karna zaroori hai, warna niche wali call compile nahi hogi:
-        // String pickFallbackModel(List<GroqMessage> messages, String excludeModelId);
         private String getOpenRouterFallbackModel(String currentModelId, List<GroqMessage> memory) {
                 try {
                         return openRouterChatService.pickFallbackModel(memory, currentModelId);
@@ -436,9 +583,13 @@ public class ChatServiceImpl implements ChatService {
                         conversation = createConversation(user, request.getMessage());
                         conversation.setTitle(generateTitleBlocking(request.getMessage()));
                         conversationRepository.save(conversation);
+                        // FIX: title turant blocking generate hua, cache bhi
+                        // turant refresh kar do
+                        syncConversationCache(conversation);
                 } else {
-                        conversation = conversationRepository.findById(request.getConversationId())
-                                        .orElseThrow(() -> new RuntimeException("Conversation not found"));
+                        // FIX: cache-first lookup — existing conversation
+                        // fetch karne ke liye ab pehle Redis check hota hai
+                        conversation = getConversationById(request.getConversationId());
                 }
 
                 saveUserMessage(conversation.getId(), request.getMessage());
@@ -462,6 +613,8 @@ public class ChatServiceImpl implements ChatService {
 
                 conversation.setUpdatedAt(LocalDateTime.now());
                 conversationRepository.save(conversation);
+                // FIX: WRITE-THROUGH — updatedAt bump hote hi cache refresh
+                syncConversationCache(conversation);
 
                 response.setRemainingTokens(walletService.getWalletByUserId(user.getId()).getRemainingTokens());
                 response.setConversationId(conversation.getId());
@@ -517,8 +670,8 @@ public class ChatServiceImpl implements ChatService {
                         if (isNewConversation) {
                                 conversation = createConversation(user, request.getMessage());
                         } else {
-                                conversation = conversationRepository.findById(request.getConversationId())
-                                                .orElseThrow(() -> new RuntimeException("Conversation not found"));
+                                // FIX: cache-first lookup
+                                conversation = getConversationById(request.getConversationId());
                         }
                         saveUserMessage(conversation.getId(), request.getMessage());
                 } catch (Exception e) {
@@ -769,25 +922,6 @@ public class ChatServiceImpl implements ChatService {
                 return continuationMemory;
         }
 
-        // FIX (root-cause #1, wrapper): finalizeStream() used to be called
-        // inside a try/catch that, on ANY exception (DB save failing,
-        // wallet service throwing something unexpected, etc.), called
-        // emitter.completeWithError(e) — which tears the HTTP connection
-        // down with NO "done" and NO "error" SSE frame ever sent. The
-        // frontend then sees a raw connection failure, which still preserves
-        // the streamed text in its store... but ChatPage.jsx's render/commit
-        // logic (fixed separately, see chatStreamStore.js /
-        // ChatPage.jsx notes) required a clean "done" to ever show or commit
-        // it. So a message that was 100% successfully generated could look
-        // like it "disappeared".
-        //
-        // Now: finalizeStreamSafely() ALWAYS results in either a "done" or
-        // an "error" SSE event being sent — even if the DB write for
-        // conversation.updatedAt fails, we still ack the client so it can
-        // commit the already-rendered text. The one thing that truly must
-        // not fail silently (saving the assistant's message so it isn't
-        // lost) is attempted first and separately from the "nice to have"
-        // conversation.updatedAt bump.
         private void finalizeStreamSafely(SseEmitter emitter, User user, Conversation conversation,
                         String fullText, String provider, String model) {
                 try {
@@ -795,10 +929,6 @@ public class ChatServiceImpl implements ChatService {
                 } catch (Exception e) {
                         log.error("finalizeStream failed for conversation {} — sending best-effort done anyway",
                                         conversation.getId(), e);
-                        // Best-effort: the assistant text was generated successfully even
-                        // though bookkeeping (save/wallet) had an issue. Tell the client
-                        // it's done so the UI keeps + commits what was streamed, instead
-                        // of silently tearing the connection down.
                         Map<String, Object> done = new HashMap<>();
                         done.put("conversationId", conversation.getId());
                         done.put("title", conversation.getTitle());
@@ -830,7 +960,6 @@ public class ChatServiceImpl implements ChatService {
                 try {
                         walletService.consumeTokens(user.getId(), trackAiTokens, FeatureType.CHAT, "AI Chat Request");
                 } catch (InsufficientTokensException e) {
-                        // Message is still saved even when tokens run out mid-generation.
                         saveAssistantMessageSafely(conversation.getId(), response);
                         bumpConversationUpdatedAtSafely(conversation);
 
@@ -850,11 +979,6 @@ public class ChatServiceImpl implements ChatService {
                         return;
                 }
 
-                // FIX: saving the assistant's message must never be skipped —
-                // this is the actual answer. It's separated from the
-                // "updatedAt" bump below (which is best-effort / cosmetic)
-                // so a failure bumping updatedAt can never cost us the
-                // message itself.
                 saveAssistantMessageSafely(conversation.getId(), response);
                 bumpConversationUpdatedAtSafely(conversation);
 
@@ -879,24 +1003,18 @@ public class ChatServiceImpl implements ChatService {
                 }
         }
 
-        // FIX (root-cause #1, targeted update): no longer re-saves the whole
-        // `conversation` entity (which raced with generateTitleAsync's
-        // save). Uses a narrow UPDATE, and any failure here is logged but
-        // never propagated — it's just the "last activity" timestamp, not
-        // user-visible content.
-        //
-        // Add this method to ConversationRepository if missing:
-        //
-        // @Modifying
-        // @Query("UPDATE Conversation c SET c.updatedAt = :updatedAt WHERE c.id = :id")
-        // int updateTimestamp(@Param("id") String id, @Param("updatedAt") LocalDateTime
-        // updatedAt);
-        //
         private void bumpConversationUpdatedAtSafely(Conversation conversation) {
                 try {
                         LocalDateTime now = LocalDateTime.now();
                         conversationRepository.updateTimestamp(conversation.getId(), now);
                         conversation.setUpdatedAt(now);
+
+                        // FIX: WRITE-THROUGH — timestamp DB mein update hote hi
+                        // cache bhi turant refresh (best-effort — updatedAt
+                        // sirf cosmetic hai, isliye poore method ka try/catch
+                        // ise bhi cover karta hai)
+                        syncConversationCache(conversation);
+
                 } catch (Exception e) {
                         log.warn("Failed to bump updatedAt for conversation {} (non-fatal): {}",
                                         conversation.getId(), e.getMessage());

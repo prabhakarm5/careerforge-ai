@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  trackai-backend:
+    container_name: trackai-backend
+
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: trackai-backend:latest
+
+    ports:
+      - "9092:9092"
+
+    env_file:
+      - .env
+
+    restart: unless-stopped
+
+    networks:
+      - trackai-network
+
+networks:
+  trackai-network:
+    driver: bridge

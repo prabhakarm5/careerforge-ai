@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    logback-spring.xml — TrackAI Backend
+
+    Goes in: src/main/resources/logback-spring.xml
+
+    Why this exists: Elastic Beanstalk ships whatever your app prints to
+    stdout/stderr straight into CloudWatch Logs. That means the console
+    log FORMAT defined here is literally what you'll be reading (and
+    searching/filtering) in CloudWatch in production — so it needs to be
+    consistent, timestamped, and free of noisy framework chatter.
+-->
+<configuration>
+
+    <!-- Console line format: timestamp [thread] LEVEL logger - message -->
+    <property name="CONSOLE_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- Root logger: base level, overridden per-package below and further
+         overridden per-profile by application-dev.yml / application-prod.yml
+         logging.level.* properties (those take precedence at runtime). -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <!-- Framework internals — keep quiet unless actively debugging them -->
+    <logger name="org.springframework" level="WARN"/>
+    <logger name="org.hibernate" level="WARN"/>
+    <logger name="org.hibernate.SQL" level="OFF"/>
+    <logger name="com.zaxxer.hikari" level="WARN"/>
+    <logger name="org.apache.catalina" level="WARN"/>
+
+    <!-- Your own application code — this is what you actually want to see -->
+    <logger name="com.trackai" level="INFO"/>
+
+</configuration>

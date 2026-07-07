@@ -40,6 +40,9 @@ public class CachedUser implements Serializable {
     // Profile
     private String profileImage;
 
+    // Public ID for profile image in cloud storage (e.g., Cloudinary)
+    private String profileImagePublicId;
+
     private String description;
 
     // Security

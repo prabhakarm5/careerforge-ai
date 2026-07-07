@@ -3,6 +3,7 @@ package com.trackai.backend.exception;
 import com.trackai.backend.dto.ErrorResponse;
 
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -14,12 +15,12 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.NoHandlerFoundException;
-
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -46,6 +47,11 @@ public class GlobalExceptionHandler {
                         HttpServletRequest request) {
 
                 Map<String, String> validationErrors = new HashMap<>();
+
+                log.warn(
+                                "Validation failed for {} {}",
+                                request.getMethod(),
+                                request.getRequestURI());
 
                 ex.getBindingResult()
                                 .getAllErrors()
@@ -257,6 +263,12 @@ public class GlobalExceptionHandler {
                         RuntimeException ex,
                         HttpServletRequest request) {
 
+                log.warn(
+                                "Runtime exception at {} {} : {}",
+                                request.getMethod(),
+                                request.getRequestURI(),
+                                ex.getMessage());
+
                 return new ResponseEntity<>(
                                 buildResponse(HttpStatus.BAD_REQUEST, "Bad Request", ex.getMessage(), request),
                                 HttpStatus.BAD_REQUEST);
@@ -268,9 +280,18 @@ public class GlobalExceptionHandler {
                         Exception ex,
                         HttpServletRequest request) {
 
+                log.error(
+                                "Unhandled exception at {} {}",
+                                request.getMethod(),
+                                request.getRequestURI(),
+                                ex);
+
                 return new ResponseEntity<>(
-                                buildResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Internal Server Error",
-                                                "Something went wrong. Please try again later.", request),
+                                buildResponse(
+                                                HttpStatus.INTERNAL_SERVER_ERROR,
+                                                "Internal Server Error",
+                                                "Something went wrong. Please try again later.",
+                                                request),
                                 HttpStatus.INTERNAL_SERVER_ERROR);
         }
 }

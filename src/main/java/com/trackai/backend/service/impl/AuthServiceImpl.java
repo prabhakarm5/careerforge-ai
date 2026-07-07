@@ -103,6 +103,11 @@ public class AuthServiceImpl implements AuthService {
                 // Upload profile image
                 String profileImage = null;
 
+                // FIX: profileImagePublicId bhi track karna zaroori hai
+                // (Cloudinary se image delete karne ke liye future mein
+                // isi publicId ki zarurat padegi in updateCurrentUser())
+                String profileImagePublicId = null;
+
                 if (request.getProfileImage() != null
                                 && !request.getProfileImage().isEmpty()) {
 
@@ -116,6 +121,9 @@ public class AuthServiceImpl implements AuthService {
 
                         profileImage = upload.getSecureUrl();
 
+                        // FIX: publicId bhi capture karo upload response se
+                        profileImagePublicId = upload.getPublicId();
+
                 }
 
                 // Create user
@@ -128,6 +136,9 @@ public class AuthServiceImpl implements AuthService {
                                 .mobileNumber(mobileNumber)
                                 .description(request.getDescription())
                                 .profileImage(profileImage)
+                                // FIX: entity mein bhi publicId set karo taaki
+                                // DB mein save ho aur baad mein delete ke kaam aaye
+                                .profileImagePublicId(profileImagePublicId)
                                 .role(Role.ROLE_USER)
                                 .enabled(false)
                                 .blocked(false)
@@ -150,6 +161,11 @@ public class AuthServiceImpl implements AuthService {
                                         .emailVerified(savedUser.getEmailVerified())
                                         .mobileNumber(savedUser.getMobileNumber())
                                         .profileImage(savedUser.getProfileImage())
+                                        // FIX: cache mein bhi publicId store karo, warna
+                                        // getAuthenticatedUser() cache-hit path pe ye field
+                                        // null aayegi aur updateCurrentUser() purani
+                                        // Cloudinary image kabhi delete nahi kar payega
+                                        .profileImagePublicId(savedUser.getProfileImagePublicId())
                                         .description(savedUser.getDescription())
                                         .createdAt(savedUser.getCreatedAt())
                                         .build();
@@ -272,6 +288,11 @@ public class AuthServiceImpl implements AuthService {
                                 .emailVerified(user.getEmailVerified())
                                 .mobileNumber(user.getMobileNumber())
                                 .profileImage(user.getProfileImage())
+                                // FIX: login ke waqt bhi cache mein publicId daalo,
+                                // taaki login ke turant baad agar user profile image
+                                // update kare to cache-hit path se purani image ka
+                                // publicId sahi mile aur delete ho sake
+                                .profileImagePublicId(user.getProfileImagePublicId())
                                 .description(user.getDescription())
                                 .createdAt(user.getCreatedAt())
                                 .build();

@@ -1,19 +1,16 @@
 package com.trackai.backend.dto;
 
 import jakarta.validation.constraints.NotBlank;
-
 import lombok.*;
 
 @Getter
 @Setter
-
 @NoArgsConstructor
 @AllArgsConstructor
-
 @Builder
 public class RefreshTokenRequest {
 
-    @NotBlank(message = "Refresh token is required")
+    // ✅ FIX — refreshToken ab cookie se aayega, body se nahi — required nahi rakha
     private String refreshToken;
 
     @NotBlank(message = "Fingerprint is required")
