@@ -7,7 +7,6 @@
 # differ locally: DB pool, SQL echo, actuator verbosity, dev-only tools
 # (ngrok), and logging.
 # =====================================================================
-
 server:
   port: ${SERVER_PORT:9092}
   shutdown: graceful

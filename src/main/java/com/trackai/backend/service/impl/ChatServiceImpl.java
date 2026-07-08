@@ -578,17 +578,23 @@ public class ChatServiceImpl implements ChatService {
                 }
 
                 Conversation conversation;
+                boolean isNewConversation = request.getConversationId() == null
+                                || request.getConversationId().isBlank();
 
-                if (request.getConversationId() == null || request.getConversationId().isBlank()) {
+                if (isNewConversation) {
+                        // ✅ FIX — pehle yahan generateTitleBlocking() call hota tha,
+                        // jo poora ek extra Groq API round-trip tha aur actual chat
+                        // response se PEHLE, sequentially wait karta tha. Isi wajah
+                        // se naye conversation ki first message bahut slow lagti thi
+                        // (2 full AI calls ek ke baad ek, back-to-back).
+                        //
+                        // Ab: placeholder title (jaise streaming flow mein hai)
+                        // turant assign karke conversation create karo, real title
+                        // background thread mein async generate hoga — user ko
+                        // wait hi nahi karna padega.
                         conversation = createConversation(user, request.getMessage());
-                        conversation.setTitle(generateTitleBlocking(request.getMessage()));
-                        conversationRepository.save(conversation);
-                        // FIX: title turant blocking generate hua, cache bhi
-                        // turant refresh kar do
-                        syncConversationCache(conversation);
                 } else {
-                        // FIX: cache-first lookup — existing conversation
-                        // fetch karne ke liye ab pehle Redis check hota hai
+                        // cache-first lookup — existing conversation
                         conversation = getConversationById(request.getConversationId());
                 }
 
@@ -613,27 +619,49 @@ public class ChatServiceImpl implements ChatService {
 
                 conversation.setUpdatedAt(LocalDateTime.now());
                 conversationRepository.save(conversation);
-                // FIX: WRITE-THROUGH — updatedAt bump hote hi cache refresh
                 syncConversationCache(conversation);
+
+                // ✅ FIX — asli title ab yahan fire-and-forget background thread
+                // mein generate hota hai. Chat response return hone se bilkul
+                // nahi rukta. Naya title ready hote hi DB + Redis cache dono
+                // update ho jaate hain — agli baar user sidebar refresh/refetch
+                // karega to updated title mil jayega.
+                if (isNewConversation) {
+                        generateTitleAsyncNonStreaming(conversation, request.getMessage());
+                }
 
                 response.setRemainingTokens(walletService.getWalletByUserId(user.getId()).getRemainingTokens());
                 response.setConversationId(conversation.getId());
-                response.setTitle(conversation.getTitle());
+                response.setTitle(conversation.getTitle()); // abhi placeholder title jayega, jo theek hai
 
                 return response;
         }
 
-        private String generateTitleBlocking(String message) {
-                try {
-                        String title = groqService.generateTitle(message);
-                        if (title == null || title.isBlank()) {
-                                return buildPlaceholderTitle(message);
+        // ✅ naya helper — streaming wale generateTitleAsync() jaisa hi hai,
+        // bas SseEmitter/safeSend nahi chahiye yahan (koi live stream nahi hai)
+        private void generateTitleAsyncNonStreaming(Conversation conversation, String firstMessage) {
+                streamExecutor.execute(() -> {
+                        try {
+                                String title = groqService.generateTitle(firstMessage);
+                                if (title == null || title.isBlank()) {
+                                        return;
+                                }
+                                title = title.trim();
+                                if (title.length() > 80) {
+                                        title = title.substring(0, 80) + "...";
+                                }
+
+                                conversationRepository.updateTitle(conversation.getId(), title);
+                                conversation.setTitle(title);
+
+                                // write-through — cache bhi turant refresh
+                                syncConversationCache(conversation);
+
+                        } catch (Exception e) {
+                                log.warn("Async title generation failed for conversation {}: {}",
+                                                conversation.getId(), e.getMessage());
                         }
-                        title = title.trim();
-                        return title.length() > 80 ? title.substring(0, 80) + "..." : title;
-                } catch (Exception e) {
-                        return buildPlaceholderTitle(message);
-                }
+                });
         }
 
         // ===================== STREAMING =====================

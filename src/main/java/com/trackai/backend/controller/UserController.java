@@ -14,32 +14,32 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class UserController {
 
-    private final UserService userService;
+        private final UserService userService;
 
-    // GET CURRENT LOGGED-IN USER
-    @GetMapping("/me")
-    public ResponseEntity<User> getCurrentUser() {
+        // GET CURRENT LOGGED-IN USER
+        @GetMapping("/me")
+        public ResponseEntity<User> getCurrentUser() {
 
-        return ResponseEntity.ok(
+                return ResponseEntity.ok(
 
-                userService
-                        .getCurrentUser());
-    }
+                                userService
+                                                .getCurrentUser());
+        }
 
-    // UPDATE CURRENT LOGGED-IN USER
-    @PutMapping(
+        // UPDATE CURRENT LOGGED-IN USER
+        @PutMapping(
 
-            value = "/me",
+                        value = "/me",
 
-            consumes = "multipart/form-data")
-    public ResponseEntity<UpdateProfileResponse> updateCurrentUser(
+                        consumes = "multipart/form-data")
+        public ResponseEntity<UpdateProfileResponse> updateCurrentUser(
 
-            @ModelAttribute @Valid UpdateProfileRequest request) {
+                        @ModelAttribute @Valid UpdateProfileRequest request) {
 
-        return ResponseEntity.ok(
+                return ResponseEntity.ok(
 
-                userService
-                        .updateCurrentUser(
-                                request));
-    }
+                                userService
+                                                .updateCurrentUser(
+                                                                request));
+        }
 }

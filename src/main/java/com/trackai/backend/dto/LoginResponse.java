@@ -18,18 +18,14 @@ public class LoginResponse {
 
     private String role;
 
-    // ✅ FIX — cookie mein jaata hai, response body mein nahi jaana chahiye
-    @JsonIgnore
+    // ✅ FIX — @JsonIgnore YAHAN SE HATA DIYA (same reason as above)
     private String accessToken;
 
-    // ✅ pehle se sahi tha — field zaroori hai kyunki
-    // AuthServiceImpl/AdminOtpLoginServiceImpl .refreshToken(refreshToken)
-    // builder method use karte hain, lekin JSON mein kabhi expose nahi hoga
+    // ✅ sahi hai — kabhi expose nahi karna
     @JsonIgnore
     private String refreshToken;
 
-    // ✅ FIX — ye bhi cookie mein jaata hai (addFingerprintCookie), isliye
-    // body mein bhejne ki zaroorat nahi
+    // ✅ sahi hai — kabhi expose nahi karna
     @JsonIgnore
     private String fingerprint;
 

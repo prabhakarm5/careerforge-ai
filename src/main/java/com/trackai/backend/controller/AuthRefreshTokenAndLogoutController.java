@@ -38,6 +38,29 @@ public class AuthRefreshTokenAndLogoutController {
         // ============================================================
         // REFRESH ACCESS TOKEN
         // ============================================================
+        //
+        // ⚠️ IMPORTANT — is endpoint ka rotation-behavior AuthService ke
+        // andar define hota hai (authService.refreshAccessToken). Agar
+        // wahan purana refresh token turant hard-delete/invalidate hota
+        // hai (no grace window, no reuse-detection family), toh
+        // multi-tab ya near-simultaneous-401 scenario mein legitimate
+        // requests bhi fail ho sakti hain — kyunki 2 requests almost
+        // saath mein purane (same) refresh-token cookie ke saath yahan
+        // aa sakti hain, aur dusri wali ko "already rotated/invalid"
+        // milega. Frontend isko "session expired" samajh ke logout kar
+        // dega, jabki session bilkul valid tha.
+        //
+        // AuthService.refreshAccessToken() mein grace-window + reuse
+        // detection add karna recommended hai:
+        // 1. Har refresh token ek "family id" ke saath store karo
+        // 2. Rotation ke time purane token ko turant delete mat karo —
+        // usse "consumed" mark karo, aur 3-5 second grace window do
+        // 3. Grace window ke andar agar wahi purana token dobara aaye
+        // (race condition), toh naya generate mat karo — jo pehle
+        // hi issue kiya tha wahi wapas do
+        // 4. Grace window ke BAHAR agar purana token use ho, toh yeh
+        // genuine reuse/theft attempt hai — poori family revoke
+        // karo aur user ko forcibly logout karo
         @PostMapping("/refresh-token")
         public ResponseEntity<RefreshTokenResponse> refreshToken(
                         HttpServletRequest httpRequest,

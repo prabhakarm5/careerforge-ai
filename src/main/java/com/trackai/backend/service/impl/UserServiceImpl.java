@@ -31,17 +31,27 @@ public class UserServiceImpl implements UserService {
 
         /*
          * ==========================================================
-         * GET AUTHENTICATED USER
+         * GET AUTHENTICATED USER (READ-ONLY PATH — cache-first)
          *
          * JWT -> Email -> Redis
          * HIT -> CachedUser se User bana ke return (NO DB CALL) ✅
          * MISS -> Database -> Save Redis -> Return
          *
-         * FIX: pehle cache HIT hone par bhi userRepository.findByEmail()
-         * call ho raha tha, jisse Redis cache ka koi fayda nahi mil raha
-         * tha aur har dashboard/profile load par DB hit ho raha tha.
-         * Ab cache hit pe seedha CachedUser se User object banta hai,
-         * DB tak jaata hi nahi.
+         * ⚠️ IMPORTANT: Ye method sirf READ (getCurrentUser) ke liye hai.
+         * CachedUser mein "password" field jaan-boojhke store nahi hoti
+         * (security ke liye), isliye cache-hit case mein yahan se return
+         * hua User object ki password hamesha NULL hogi.
+         *
+         * Isi wajah se pehle bug tha: updateCurrentUser() isi method ka
+         * result seedha userRepository.save() ko de raha tha — cache-hit
+         * hote hi save() ne password column ko NULL se overwrite kar diya,
+         * jisse DB ka NOT NULL constraint tootke poora PUT /api/users/me
+         * fail ho raha tha (aur isliye profile update kabhi hota hi nahi
+         * tha).
+         *
+         * FIX: updateCurrentUser() ab is method ki jagah niche wali
+         * getManagedUserForUpdate() use karta hai, jo hamesha DB se
+         * poora entity (password samet) laata hai.
          * ==========================================================
          */
         private User getAuthenticatedUser() {
@@ -68,8 +78,6 @@ public class UserServiceImpl implements UserService {
                                         .emailVerified(cachedUser.getEmailVerified())
                                         .mobileNumber(cachedUser.getMobileNumber())
                                         .profileImage(cachedUser.getProfileImage())
-                                        // FIX: publicId bhi map karo, warna updateCurrentUser()
-                                        // mein oldPublicId hamesha null milegi cache-hit path pe
                                         .profileImagePublicId(cachedUser.getProfileImagePublicId())
                                         .description(cachedUser.getDescription())
                                         .createdAt(cachedUser.getCreatedAt())
@@ -101,7 +109,6 @@ public class UserServiceImpl implements UserService {
                                         .emailVerified(user.getEmailVerified())
                                         .mobileNumber(user.getMobileNumber())
                                         .profileImage(user.getProfileImage())
-                                        // FIX: DB se cache banate waqt bhi publicId include karo
                                         .profileImagePublicId(user.getProfileImagePublicId())
                                         .description(user.getDescription())
                                         .createdAt(user.getCreatedAt())
@@ -115,6 +122,31 @@ public class UserServiceImpl implements UserService {
 
         }
 
+        /*
+         * ==========================================================
+         * GET MANAGED USER FOR UPDATE (DB-ONLY — NO CACHE)
+         *
+         * ✅ FIX: Kisi bhi write/update operation ke liye hamesha DB se
+         * hi poora entity fetch karo — password, passwordChangedAt, jaisi
+         * fields jo CachedUser mein store hi nahi hoti, unhe save() ke
+         * dauraan accidental NULL hone se bachane ke liye.
+         *
+         * Read path (getCurrentUser) abhi bhi cache-first rahega taaki
+         * dashboard/profile GET fast rahe — sirf UPDATE ke waqt hi is
+         * "safe" method ka use hoga.
+         * ==========================================================
+         */
+        private User getManagedUserForUpdate() {
+
+                Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+
+                String email = authentication.getName();
+
+                return userRepository
+                                .findByEmail(email)
+                                .orElseThrow(() -> new RuntimeException("User not found"));
+        }
+
         @Override
         public User getCurrentUser() {
 
@@ -124,7 +156,9 @@ public class UserServiceImpl implements UserService {
         @Override
         public UpdateProfileResponse updateCurrentUser(UpdateProfileRequest request) {
 
-                User user = getAuthenticatedUser();
+                // ✅ FIX — cache-built (possibly password-null) object ki
+                // jagah, hamesha DB se seedha managed entity lo
+                User user = getManagedUserForUpdate();
 
                 List<String> updatedFields = new ArrayList<>();
                 List<String> restrictedFields = new ArrayList<>();
@@ -178,12 +212,10 @@ public class UserServiceImpl implements UserService {
                 }
 
                 /*
-                 * NOTE: getAuthenticatedUser() ab cache-hit case mein DB se
-                 * DETACHED User object return karta hai. userRepository.save()
-                 * ko phir bhi call karna zaroori hai taaki changes DB mein
-                 * persist ho (JPA yahan save() ke through hi update karega,
-                 * dirty-checking cache-hit path pe nahi chalegi kyunki
-                 * object DB-managed session se attached nahi hai).
+                 * ✅ Ab "user" hamesha DB-managed, poori fields wali entity
+                 * hai (password samet), isliye save() koi bhi column NULL
+                 * nahi karega — sirf upar jo fields explicitly set ki
+                 * gayi hain wahi update hongi.
                  */
                 User updatedUser = userRepository.save(user);
 
@@ -199,14 +231,16 @@ public class UserServiceImpl implements UserService {
                                         .emailVerified(updatedUser.getEmailVerified())
                                         .mobileNumber(updatedUser.getMobileNumber())
                                         .profileImage(updatedUser.getProfileImage())
-                                        // FIX: naya publicId cache mein bhi update karo,
-                                        // warna agla profile-image-update purani (ab-invalid)
-                                        // publicId use karega
                                         .profileImagePublicId(updatedUser.getProfileImagePublicId())
                                         .description(updatedUser.getDescription())
                                         .createdAt(updatedUser.getCreatedAt())
                                         .build();
 
+                        // ✅ Update ke baad cache ko bhi turant refresh karo,
+                        // taaki agla GET /api/users/me (chahe wo refresh-token
+                        // rotation ke turant baad hi kyun na aaye) purana/stale
+                        // data na dikhaye — Redis mein latest values turant
+                        // overwrite ho jaate hain.
                         redisUserCacheService.updateUser(cachedUser1);
                 }
                 if (updatedFields.isEmpty() && restrictedFields.isEmpty()) {

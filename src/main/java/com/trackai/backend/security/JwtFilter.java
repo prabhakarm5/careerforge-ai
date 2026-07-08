@@ -41,17 +41,6 @@ public class JwtFilter extends OncePerRequestFilter {
                                 || path.startsWith("/api/plans");
         }
 
-        // ✅ NEW FIX — SSE (SseEmitter) responses trigger an ASYNC DISPATCH when
-        // emitter.complete()/completeWithError() is called. Spring's
-        // OncePerRequestFilter, by default, SKIPS running the filter chain
-        // again on that async redispatch (shouldNotFilterAsyncDispatch()
-        // returns true by default). That meant JwtFilter never re-ran on the
-        // redispatch, SecurityContext ended up empty, and AuthorizationFilter
-        // threw AccessDeniedException AFTER the SSE response was already
-        // committed — the exact "Unable to handle the Spring Security
-        // Exception because the response is already committed" crash seen in
-        // the logs. Returning false here forces this filter to run on async
-        // dispatch too, so auth stays valid for the whole SSE lifecycle.
         @Override
         protected boolean shouldNotFilterAsyncDispatch() {
                 return false;

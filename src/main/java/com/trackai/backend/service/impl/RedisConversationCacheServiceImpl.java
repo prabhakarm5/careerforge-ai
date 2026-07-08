@@ -105,7 +105,7 @@ public class RedisConversationCacheServiceImpl
                         String key = CONVERSATION_PREFIX + conversationId;
 
                         redisTemplate.delete(key);
-
+        
                         log.info("Conversation cache evicted : {}", key);
 
                 } catch (Exception e) {
