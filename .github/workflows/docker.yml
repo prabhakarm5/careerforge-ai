@@ -51,7 +51,7 @@ jobs:
           aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           application_name: careerforge-ai
-          environment_name: careerforge-ai-prod
+          environment_name: careerforge-ai-env
           version_label: careerforge-${{ github.sha }}
           region: ap-south-1
           deployment_package: careerforge-deploy.zip
