@@ -71,21 +71,8 @@ public class ChatServiceImpl implements ChatService {
         private final MemoryRetrievalService memoryRetrievalService;
         private final ObjectMapper objectMapper;
 
-        // User cache (already existed)
         private final RedisUserCacheService redisUserCacheService;
-
-        // FIX (naya): conversation metadata ka WRITE-THROUGH cache —
-        // findById() ka DB hit chat ke hottest path (sendMessage,
-        // streamMessage) mein har baar hota tha existing conversation
-        // ke liye. Ab cache-first.
         private final RedisConversationCacheService redisConversationCacheService;
-
-        // FIX (naya): chat memory (last 20 messages) ka Redis LIST-based
-        // write-through cache. Ye sabse zyada faayda dega — pehle
-        // buildConversationMemory() HAR message pe ek
-        // findByConversationIdOrderByCreatedAtDesc query chalata tha,
-        // jo ab sirf cache-miss (naya conversation / 2hr inactivity)
-        // ke case mein hi chalega.
         private final RedisChatMemoryCacheService redisChatMemoryCacheService;
 
         private final ThreadPoolTaskExecutor streamExecutor;
@@ -116,8 +103,8 @@ public class ChatServiceImpl implements ChatService {
                         MemoryRetrievalService memoryRetrievalService,
                         ObjectMapper objectMapper,
                         RedisUserCacheService redisUserCacheService,
-                        RedisConversationCacheService redisConversationCacheService, // naya
-                        RedisChatMemoryCacheService redisChatMemoryCacheService) { // naya
+                        RedisConversationCacheService redisConversationCacheService,
+                        RedisChatMemoryCacheService redisChatMemoryCacheService) {
 
                 this.groqService = groqService;
                 this.openRouterChatService = openRouterChatService;
@@ -226,6 +213,17 @@ public class ChatServiceImpl implements ChatService {
                 }
         }
 
+        // NEW — dedicated helper to push a "thought" step to the client.
+        // This is what powers the Claude-style "thinking trail" in the UI:
+        // every real step the backend takes (reading context, searching
+        // memory, picking a model, generating) gets narrated as it happens,
+        // instead of the UI only ever showing a generic "Thinking..." spinner.
+        private void sendThought(SseEmitter emitter, String label) {
+                Map<String, String> payload = new HashMap<>();
+                payload.put("label", label);
+                safeSend(emitter, "thought", payload);
+        }
+
         private void completeEmitter(SseEmitter emitter, String conversationId) {
                 try {
                         Disposable heartbeat = heartbeatTasks.remove(conversationId);
@@ -298,10 +296,6 @@ public class ChatServiceImpl implements ChatService {
         }
 
         // ===================== CONVERSATION CACHE HELPERS =====================
-
-        // FIX (naya): Conversation entity -> CachedConversation, turant
-        // Redis mein WRITE-THROUGH save. Har jagah jahan conversation
-        // DB mein save/update hota hai, iske turant baad ye call hoga.
         private void syncConversationCache(Conversation conversation) {
 
                 CachedConversation cached = CachedConversation.builder()
@@ -320,15 +314,6 @@ public class ChatServiceImpl implements ChatService {
                 redisConversationCacheService.saveConversation(cached);
         }
 
-        // FIX (naya): cache-first conversation lookup. sendMessage() aur
-        // streamMessage() dono mein existing conversation fetch karne ke
-        // liye pehle ye call hoga, DB findById() sirf cache-MISS pe.
-        //
-        // NOTE: cache-hit case mein hum ek "detached" Conversation object
-        // bana rahe hain jo sirf read/data-carrier ki tarah use hoga
-        // (title/id/userId padhne ke liye). Isko dobara .save() mat
-        // karna DB overwrite se bachne ke liye — jahan bhi save() zaroori
-        // hai, wahan ye method use hi nahi hua, sirf reads mein hua hai.
         private Conversation getConversationById(String conversationId) {
 
                 CachedConversation cached = redisConversationCacheService.getConversation(conversationId);
@@ -380,9 +365,6 @@ public class ChatServiceImpl implements ChatService {
 
                                 conversationRepository.updateTitle(conversation.getId(), title);
                                 conversation.setTitle(title);
-
-                                // FIX: WRITE-THROUGH — title DB mein update hote hi
-                                // cache bhi turant fresh title se refresh
                                 syncConversationCache(conversation);
 
                                 Map<String, Object> payload = new HashMap<>();
@@ -410,10 +392,6 @@ public class ChatServiceImpl implements ChatService {
                                 .build();
 
                 Conversation saved = conversationRepository.save(conversation);
-
-                // FIX: naya conversation bana hi hai to turant cache mein
-                // bhi daal do — agli hi request (findById lookup) cache-hit
-                // paayegi
                 syncConversationCache(saved);
 
                 return saved;
@@ -430,10 +408,6 @@ public class ChatServiceImpl implements ChatService {
                                 .build();
                 chatMessageRepository.save(chatMessage);
 
-                // FIX: WRITE-THROUGH — turant Redis list mein bhi push,
-                // taaki isi request ke andar chalne wali
-                // buildConversationMemory() ya agla message turant
-                // cache se serve ho, koi extra DB read na lage
                 redisChatMemoryCacheService.appendMessage(conversationId,
                                 new GroqMessage("user", message));
         }
@@ -452,39 +426,19 @@ public class ChatServiceImpl implements ChatService {
                                 .build();
                 chatMessageRepository.save(chatMessage);
 
-                // FIX: WRITE-THROUGH — assistant ka reply bhi turant
-                // memory list mein push, taaki agla message isi
-                // conversation ka full fresh context Redis se hi paaye
                 redisChatMemoryCacheService.appendMessage(conversationId,
                                 new GroqMessage("assistant", response.getResponse()));
         }
 
         // ===================== MEMORY =====================
-        //
-        // FIX (sabse bada change): Pehle ye method HAR call pe seedha
-        // findByConversationIdOrderByCreatedAtDesc query chalata tha —
-        // aur ye method sendMessage() + streamMessage() dono mein, har
-        // single chat message pe call hoti hai. Chat sabse high-traffic
-        // path hai, isliye ye query sabse zyada DB load ka source thi.
-        //
-        // Ab REDIS-FIRST: Redis LIST (chat_memory:{conversationId}) mein
-        // hamesha last 20 messages write-through rehte hain (dekho
-        // saveUserMessage/saveAssistantMessage). Cache HIT ho to DB
-        // bilkul touch nahi hota. Cache sirf naya conversation ya 2hr+
-        // inactivity ke case mein MISS hota hai — tab hi ek baar DB se
-        // load karke hydrate kar dete hain, uske baad wapas cache-only.
         private List<GroqMessage> buildConversationMemory(String conversationId) {
 
-                // STEP-1: REDIS CHECK
                 List<GroqMessage> cached = redisChatMemoryCacheService.getMemory(conversationId);
 
                 if (cached != null) {
-                        // mutable copy — augmentWithRecalledContext() isme
-                        // add(0, ...) karta hai, isliye ArrayList zaroori hai
                         return new ArrayList<>(cached);
                 }
 
-                // STEP-2: DATABASE (cache MISS)
                 List<ChatMessage> recentMessages = chatMessageRepository
                                 .findByConversationIdOrderByCreatedAtDesc(
                                                 conversationId, PageRequest.of(0, MAX_MEMORY_MESSAGES));
@@ -498,24 +452,25 @@ public class ChatServiceImpl implements ChatService {
                                                 message.getContent()))
                                 .collect(Collectors.toList());
 
-                // STEP-3: HYDRATE CACHE — agli baar isi conversation ke
-                // liye cache-hit milega
                 redisChatMemoryCacheService.hydrateMemory(conversationId, messages);
 
                 return messages;
         }
 
         // ===================== ON-DEMAND RAG =====================
-        private void augmentWithRecalledContext(List<GroqMessage> memory, String conversationId,
+        // CHANGED: now returns whether it actually injected recalled context,
+        // so the caller can narrate a real "Searching memory" thought step
+        // only when it's true (instead of always claiming to search).
+        private boolean augmentWithRecalledContext(List<GroqMessage> memory, String conversationId,
                         String userMessage) {
 
                 if (!memoryRetrievalService.isRecallIntent(userMessage)) {
-                        return;
+                        return false;
                 }
 
                 List<String> snippets = memoryRetrievalService.retrieveRelevant(conversationId, userMessage);
                 if (snippets.isEmpty()) {
-                        return;
+                        return false;
                 }
 
                 String context = "Relevant earlier context from this conversation "
@@ -526,6 +481,8 @@ public class ChatServiceImpl implements ChatService {
 
                 log.info("RAG: injected {} recalled snippet(s) for conversation {}",
                                 snippets.size(), conversationId);
+
+                return true;
         }
 
         private int estimateTokens(String text) {
@@ -582,19 +539,8 @@ public class ChatServiceImpl implements ChatService {
                                 || request.getConversationId().isBlank();
 
                 if (isNewConversation) {
-                        // ✅ FIX — pehle yahan generateTitleBlocking() call hota tha,
-                        // jo poora ek extra Groq API round-trip tha aur actual chat
-                        // response se PEHLE, sequentially wait karta tha. Isi wajah
-                        // se naye conversation ki first message bahut slow lagti thi
-                        // (2 full AI calls ek ke baad ek, back-to-back).
-                        //
-                        // Ab: placeholder title (jaise streaming flow mein hai)
-                        // turant assign karke conversation create karo, real title
-                        // background thread mein async generate hoga — user ko
-                        // wait hi nahi karna padega.
                         conversation = createConversation(user, request.getMessage());
                 } else {
-                        // cache-first lookup — existing conversation
                         conversation = getConversationById(request.getConversationId());
                 }
 
@@ -621,24 +567,17 @@ public class ChatServiceImpl implements ChatService {
                 conversationRepository.save(conversation);
                 syncConversationCache(conversation);
 
-                // ✅ FIX — asli title ab yahan fire-and-forget background thread
-                // mein generate hota hai. Chat response return hone se bilkul
-                // nahi rukta. Naya title ready hote hi DB + Redis cache dono
-                // update ho jaate hain — agli baar user sidebar refresh/refetch
-                // karega to updated title mil jayega.
                 if (isNewConversation) {
                         generateTitleAsyncNonStreaming(conversation, request.getMessage());
                 }
 
                 response.setRemainingTokens(walletService.getWalletByUserId(user.getId()).getRemainingTokens());
                 response.setConversationId(conversation.getId());
-                response.setTitle(conversation.getTitle()); // abhi placeholder title jayega, jo theek hai
+                response.setTitle(conversation.getTitle());
 
                 return response;
         }
 
-        // ✅ naya helper — streaming wale generateTitleAsync() jaisa hi hai,
-        // bas SseEmitter/safeSend nahi chahiye yahan (koi live stream nahi hai)
         private void generateTitleAsyncNonStreaming(Conversation conversation, String firstMessage) {
                 streamExecutor.execute(() -> {
                         try {
@@ -653,8 +592,6 @@ public class ChatServiceImpl implements ChatService {
 
                                 conversationRepository.updateTitle(conversation.getId(), title);
                                 conversation.setTitle(title);
-
-                                // write-through — cache bhi turant refresh
                                 syncConversationCache(conversation);
 
                         } catch (Exception e) {
@@ -698,7 +635,6 @@ public class ChatServiceImpl implements ChatService {
                         if (isNewConversation) {
                                 conversation = createConversation(user, request.getMessage());
                         } else {
-                                // FIX: cache-first lookup
                                 conversation = getConversationById(request.getConversationId());
                         }
                         saveUserMessage(conversation.getId(), request.getMessage());
@@ -708,7 +644,8 @@ public class ChatServiceImpl implements ChatService {
                 }
 
                 List<GroqMessage> memory = buildConversationMemory(conversation.getId());
-                augmentWithRecalledContext(memory, conversation.getId(), request.getMessage());
+                boolean recalledContext = augmentWithRecalledContext(memory, conversation.getId(),
+                                request.getMessage());
                 memory.add(GroqMessage.builder().role("user").content(request.getMessage()).build());
 
                 boolean useOpenRouter = isOpenRouterModel(request.getModel());
@@ -726,10 +663,15 @@ public class ChatServiceImpl implements ChatService {
                         meta.put("provider", useOpenRouter ? "OPENROUTER" : "GROQ");
                         emitter.send(SseEmitter.event().name("meta").data(objectMapper.writeValueAsString(meta)));
 
-                        emitter.send(SseEmitter.event().name("status")
-                                        .data("Detecting language and reading conversation context"));
-                        emitter.send(SseEmitter.event().name("status").data("Selected model: " + requestedModelId));
-                        emitter.send(SseEmitter.event().name("status").data("Generating response"));
+                        // NEW — real thought trail (Claude-style), sent as
+                        // distinct "thought" events instead of one generic
+                        // "status" string the UI used to throw away.
+                        sendThought(emitter, "Reading your message and conversation history");
+                        if (recalledContext) {
+                                sendThought(emitter, "Searching earlier messages for relevant context");
+                        }
+                        sendThought(emitter, "Selected model: " + requestedModelId);
+                        sendThought(emitter, "Generating response");
                 } catch (Exception e) {
                         log.warn("Failed to send meta event", e);
                 }
@@ -916,18 +858,22 @@ public class ChatServiceImpl implements ChatService {
                 }
         }
 
+        // CHANGED: message text translated to English; also emits a
+        // "thought" step so the switch shows up in the thinking trail too,
+        // not just as a one-off toast.
         private void notifyModelSwitch(SseEmitter emitter, String fromModel, String toModel) {
                 try {
                         Map<String, Object> switched = new HashMap<>();
                         switched.put("from", fromModel);
                         switched.put("to", toModel);
                         switched.put("message",
-                                        "\"" + fromModel + "\" ne response beech me rok diya. "
+                                        "\"" + fromModel + "\" stopped responding midway. "
                                                         + "Switched to \"" + toModel
                                                         + "\" automatically to continue the same answer.");
                         emitter.send(SseEmitter.event()
                                         .name("model_switched")
                                         .data(objectMapper.writeValueAsString(switched)));
+                        sendThought(emitter, "Switched to " + toModel + " to keep going");
                 } catch (Exception ignored) {
                 }
         }
@@ -1036,11 +982,6 @@ public class ChatServiceImpl implements ChatService {
                         LocalDateTime now = LocalDateTime.now();
                         conversationRepository.updateTimestamp(conversation.getId(), now);
                         conversation.setUpdatedAt(now);
-
-                        // FIX: WRITE-THROUGH — timestamp DB mein update hote hi
-                        // cache bhi turant refresh (best-effort — updatedAt
-                        // sirf cosmetic hai, isliye poore method ka try/catch
-                        // ise bhi cover karta hai)
                         syncConversationCache(conversation);
 
                 } catch (Exception e) {
