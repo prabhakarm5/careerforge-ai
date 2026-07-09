@@ -24,7 +24,6 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -78,7 +77,6 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
 
         // Send admin login OTP
         @Override
-        @Async
         public void sendAdminLoginOtp(
                         String email,
                         String password) {

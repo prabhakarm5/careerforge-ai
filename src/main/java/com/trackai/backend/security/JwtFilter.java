@@ -17,6 +17,12 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
+// NOTE: this file is UNCHANGED from what you already have — it was already
+// correct. The crash in your logs was NOT coming from this filter; it was
+// coming from Spring Security's own built-in AuthorizationFilter re-running
+// on the SSE async-completion dispatch (see SecurityConfig.java for the
+// actual fix: DispatcherType.ASYNC/ERROR permitAll()). Keeping this file
+// here just for completeness so you have the full, consistent set.
 @Component
 @RequiredArgsConstructor
 public class JwtFilter extends OncePerRequestFilter {
@@ -41,20 +47,16 @@ public class JwtFilter extends OncePerRequestFilter {
                                 || path.startsWith("/api/plans");
         }
 
-        // FIX (real fix, reverted the previous wrong "fix"): SSE responses
-        // (SseEmitter) trigger an ASYNC DISPATCH when emitter.complete() /
-        // completeWithError() runs. Re-running JwtFilter on that redispatch
-        // (returning false here) means that if anything about the token looks
-        // even slightly off on that second pass, this filter tries to write a
-        // 401 onto a response that has ALREADY been committed and flushed as
-        // an SSE stream — that is exactly the
-        // "Unable to handle the Spring Security Exception because the
-        // response is already committed" crash, and it fires AFTER a perfectly
-        // good answer was already shown to the user.
-        // Returning true (the default OncePerRequestFilter behavior) keeps
-        // this filter OUT of the async redispatch — auth was already validated
-        // once when the SSE connection opened, nothing needs re-checking on
-        // the completion dispatch.
+        // SSE responses (SseEmitter) trigger an ASYNC DISPATCH when
+        // emitter.complete() / completeWithError() runs. Re-running JwtFilter
+        // on that redispatch (returning false here) means that if anything
+        // about the token looks even slightly off on that second pass, this
+        // filter tries to write a 401 onto a response that has ALREADY been
+        // committed and flushed as an SSE stream. Returning true (the
+        // default OncePerRequestFilter behavior) keeps this filter OUT of
+        // the async redispatch — auth was already validated once when the
+        // SSE connection opened, nothing needs re-checking on the
+        // completion dispatch.
         @Override
         protected boolean shouldNotFilterAsyncDispatch() {
                 return true;
@@ -120,7 +122,7 @@ public class JwtFilter extends OncePerRequestFilter {
 
         private void sendUnauthorized(HttpServletResponse response, String message)
                         throws IOException {
-                // FIX: guard against writing to an already-committed response.
+                // Guard against writing to an already-committed response.
                 // Without this, any late 401 attempt on a finished SSE stream
                 // throws IllegalStateException and shows up as a server-side
                 // crash log even though the client already got its full answer.

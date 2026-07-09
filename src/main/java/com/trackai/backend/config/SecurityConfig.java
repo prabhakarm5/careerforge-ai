@@ -4,6 +4,8 @@ import com.trackai.backend.security.JwtAccessDeniedHandler;
 import com.trackai.backend.security.JwtAuthenticationEntryPoint;
 import com.trackai.backend.security.JwtFilter;
 
+import jakarta.servlet.DispatcherType;
+
 import lombok.RequiredArgsConstructor;
 
 import org.springframework.context.annotation.Bean;
@@ -34,6 +36,35 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  * must come before broader matchers ("/api/payment/**") because Spring
  * Security's AuthorizationManager evaluates rules top-to-bottom and stops
  * at the first match.
+ *
+ * FIX — ASYNC DISPATCH CRASH (root cause of the AccessDeniedException /
+ * "response already committed" errors you were seeing right when an SSE
+ * chat stream finished):
+ *
+ * SseEmitter.complete() triggers Tomcat to run an ASYNC dispatch back
+ * through the servlet/filter chain so the container can cleanly finalize
+ * the response. JwtFilter correctly skips itself on that dispatch
+ * (shouldNotFilterAsyncDispatch() -> true) — but Spring Security's OWN
+ * built-in AuthorizationFilter does NOT skip itself by default. It runs
+ * again on that async dispatch, finds no SecurityContext (nothing set it
+ * on this new dispatch, since JwtFilter deliberately didn't run), and
+ * throws AccessDeniedException on a response that's already been fully
+ * streamed and committed to the client — which Spring then can't even
+ * turn into a clean error response, so the connection gets abruptly
+ * reset instead of closing cleanly. That's exactly what corrupts the
+ * end of a stream, breaks "done"/save events, and makes memory/history
+ * look inconsistent afterwards.
+ *
+ * The single-line fix: explicitly permitAll() on DispatcherType.ASYNC
+ * and DispatcherType.ERROR, placed as the FIRST authorization rule (must
+ * come before every other matcher, since Spring Security evaluates rules
+ * top-to-bottom and stops at the first match). This does not weaken
+ * security — it does not skip authentication for the original incoming
+ * request (that still goes through JwtFilter + the
+ * "anyRequest().authenticated()"
+ * rule below on the INITIAL dispatch). It only stops Spring from
+ * re-authorizing the container's own internal completion dispatch of a
+ * request that was already authenticated once.
  */
 @Configuration
 @RequiredArgsConstructor
@@ -136,6 +167,21 @@ public class SecurityConfig {
 
                                 // ── AUTHORIZATION RULES ─────────────────────────────────
                                 .authorizeHttpRequests(auth -> auth
+
+                                                // ⬇️ MUST BE THE VERY FIRST RULE. Spring Security
+                                                // evaluates matchers top-to-bottom and stops at the
+                                                // first match, so this has to win before any other
+                                                // rule gets a chance to run "anyRequest().authenticated()"
+                                                // against the container's internal ASYNC/ERROR
+                                                // dispatch of an SSE stream that already finished.
+                                                // See the class-level Javadoc above for the full
+                                                // explanation — this is the actual fix for the
+                                                // AccessDeniedException / "response already
+                                                // committed" crash at the end of every chat stream.
+                                                .dispatcherTypeMatchers(
+                                                                DispatcherType.ASYNC,
+                                                                DispatcherType.ERROR)
+                                                .permitAll()
 
                                                 // Public auth endpoints — no token exists yet at
                                                 // login/register/otp/refresh time, so these must

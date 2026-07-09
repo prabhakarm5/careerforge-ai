@@ -1,5 +1,6 @@
 # =====================================================================
-# application-dev.yml — DEV profile ONLY
+# application-prod.yml — PROD profile ONLY
+
 # =====================================================================
 # Everything shared with prod (Cloudinary, Groq, OpenRouter, Razorpay,
 # JWT/OTP expiry, rate-limits, token costs) now lives in

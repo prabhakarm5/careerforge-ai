@@ -15,12 +15,28 @@
 # redeclared there (profile-specific always wins over common).
 # =====================================================================
 
-# =========================================
 # CUSTOM APP SETTINGS
 # =========================================
 app:
 
-  frontend-url: ${FRONTEND_URL}
+  # ---------------------------------------
+  # FRONTEND URL
+  # Used for:
+  # - Email verification links
+  # - Forgot/reset password links
+  # - CORS default allowed origin
+  # - OpenRouter referer
+  # ---------------------------------------
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
+
+    # ---------------------------------------
+  # CORS
+  # By default, same frontend-url allow hoga.
+  # Agar future mein multiple origins chahiye, env se comma-separated de sakte ho:
+  # CORS_ALLOWED_ORIGINS=https://app.domain.com,https://carerforge-frontend.pages.dev
+  # ---------------------------------------
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:${app.frontend-url}}
 
   # ---------------------------------------
   # WALLET
