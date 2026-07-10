@@ -89,11 +89,7 @@ public class AuthRefreshTokenAndLogoutController {
                                 httpResponse,
                                 result.getRefreshToken(),
                                 refreshTokenExpiry);
-
-                cookieUtil.addAccessTokenCookie(
-                                httpResponse,
-                                result.getAccessToken(),
-                                accessTokenExpiry);
+                // Access token cookie intentionally set nahi hoti; body se frontend memory mein jayega.
 
                 // fingerprint cookie same rehti hai (rotate nahi hoti), isliye dobara set
                 // karne ki zaroorat nahi — chhod do jaisi hai

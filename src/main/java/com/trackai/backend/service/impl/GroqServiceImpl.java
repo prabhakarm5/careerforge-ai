@@ -49,8 +49,8 @@ public class GroqServiceImpl implements GroqService {
         // fixed value tha, har request (chhota "hi" ho ya bada essay) same
         // max_tokens maangti thi. Ab input conversation ki size dekh kar
         // dynamically decide karte hain, exactly OpenRouterChatServiceImpl
-        // jaisa hi logic — chhota input -> chhota request, bada input ->
-        // zyada room, hमेशा ABSOLUTE_MAX_TOKENS aur model ke context window
+        // jaisa hi logic Ã¢â‚¬â€ chhota input -> chhota request, bada input ->
+        // zyada room, hÃ Â¤Â®Ã Â¥â€¡Ã Â¤Â¶Ã Â¤Â¾ ABSOLUTE_MAX_TOKENS aur model ke context window
         // ke andar.
         private static final int ABSOLUTE_MAX_TOKENS = 8192;
         private static final int MIN_TOKENS = 1024;
@@ -60,7 +60,7 @@ public class GroqServiceImpl implements GroqService {
         // FIX (bhai's report: "answer aadha mein ruk jaata hai" + "bahut slow"):
         // Jab model apni max_tokens limit hit karta tha (finish_reason:
         // "length"), purana code ise ERROR treat karta tha aur
-        // ChatServiceImpl ka fallback/continuation chain trigger hota tha —
+        // ChatServiceImpl ka fallback/continuation chain trigger hota tha Ã¢â‚¬â€
         // jo poora accumulated text + poora memory leke agle model ko
         // bhejta tha, phir wahi truncate ho jaaye to teesre model ko... max
         // 6 baar tak. Har hop ek naya network round-trip hai (isliye slow),
@@ -70,25 +70,22 @@ public class GroqServiceImpl implements GroqService {
         //
         // Naya behaviour: truncation par doosre model par kabhi jump nahi
         // karte. Bas ek chhota polite note chipka ke stream ko turant,
-        // cleanly complete kar dete hain. Isse dono cheez fix — speed
+        // cleanly complete kar dete hain. Isse dono cheez fix Ã¢â‚¬â€ speed
         // (no more multi-model chaining) aur "atakna" (hamesha ek clean,
         // complete-feeling ending milega).
-        private static final String TRUNCATION_NOTE = "\n\n---\n"
-                        + "_⚠️ Yeh jawaab bahut lamba tha isliye poora ek saath nahi de paaya — "
-                        + "itna bada code/answer ek single response mein possible nahi hai. "
-                        + "Agla part chahiye to bas **\"continue\"** likh dijiye._";
+        private static final String TRUNCATION_NOTE = "\n\n---\n_Answer budget reached, so I wrapped this response as tightly as possible. Ask for a specific section if you want it expanded._";
 
         private static final String SYSTEM_PROMPT = """
                         You are CareerForge AI, a knowledgeable and helpful assistant.
 
                         How to respond:
                         - Auto-detect the user's language. If the user writes Hindi/Hinglish, answer in Hindi/Hinglish. If the user writes English, answer in English.
-                        - Prefer detailed, complete answers. Simple questions can be concise, but teaching, debugging, planning, and comparison questions should be thorough.
+                        - Give the most complete answer possible in one response. If the user asks for code, a page, or a file, provide a compact but complete working version instead of asking the user to type continue.
                         - Use rich Markdown formatting: short headings, bullets, numbered steps, tables, and code blocks when useful. Make the answer visually easy to scan.
                         - When helpful, briefly show visible progress sections such as "What I checked", "What I found", and "Next steps". Do not claim web search unless a web search tool was actually used.
                         - Never pad an answer with filler, generic disclaimers, or repeated points just to sound longer. Every sentence should add real information.
                         - For code questions: always provide complete, working, copy-pasteable code in proper markdown code blocks with the correct language tag.
-                        - Always finish your answer completely; never stop mid-sentence or mid-list.
+                        - Always finish your answer cleanly; never stop mid-sentence or mid-list, and never tell the user to type continue as the main solution.
                         - If an image is attached, describe/analyze it carefully before answering.
                         - NEVER say you are LLaMA, GPT, DeepSeek, or any other underlying model. You are CareerForge AI.
                         """;
@@ -271,7 +268,7 @@ public class GroqServiceImpl implements GroqService {
 
                 int dynamicMaxTokens = computeDynamicMaxTokens(messages, resolved.getId());
 
-                log.info("Groq stream request — model={}, dynamicMaxTokens={}", resolved.getId(), dynamicMaxTokens);
+                log.info("Groq stream request Ã¢â‚¬â€ model={}, dynamicMaxTokens={}", resolved.getId(), dynamicMaxTokens);
 
                 Object requestBody = useImage
                                 ? buildVisionRequestBody(messages, resolved.getId(), imageBase64, dynamicMaxTokens)
@@ -307,11 +304,11 @@ public class GroqServiceImpl implements GroqService {
                                                 () -> {
                                                         // FIX: truncation ab error/fallback-chain trigger
                                                         // nahi karta. Bas ek note chipka ke turant,
-                                                        // cleanly complete karte hain — fast bhi, aur
+                                                        // cleanly complete karte hain Ã¢â‚¬â€ fast bhi, aur
                                                         // "beech mein atka" wala feeling bhi nahi aata.
                                                         if (truncated.get()) {
                                                                 log.warn(
-                                                                                "Groq stream truncated at max_tokens (model={}) — finishing gracefully with note",
+                                                                                "Groq stream truncated at max_tokens (model={}) Ã¢â‚¬â€ finishing gracefully with note",
                                                                                 resolved.getId());
                                                                 onChunk.accept(TRUNCATION_NOTE);
                                                         }
@@ -322,7 +319,7 @@ public class GroqServiceImpl implements GroqService {
         // ===================== DYNAMIC TOKEN SIZING =====================
 
         // FIX: Ye method OpenRouterChatServiceImpl.computeDynamicMaxTokens()
-        // jaisa hi hai — input conversation ki size dekh kar decide karta
+        // jaisa hi hai Ã¢â‚¬â€ input conversation ki size dekh kar decide karta
         // hai kitna max_tokens maangna hai, taaki chhota message chhota
         // request bheje aur bada message zyada room paaye, lekin hamesha
         // ABSOLUTE_MAX_TOKENS aur model ke apne context window ke andar hi
@@ -345,7 +342,7 @@ public class GroqServiceImpl implements GroqService {
                         candidate = MIN_TOKENS;
                 }
 
-                log.debug("Dynamic max_tokens calc — model={}, contextWindow={}, estimatedInput={}, "
+                log.debug("Dynamic max_tokens calc Ã¢â‚¬â€ model={}, contextWindow={}, estimatedInput={}, "
                                 + "roomForOutput={}, proportionalCeiling={}, final={}",
                                 modelId, contextWindow, estimatedInputTokens, roomForOutput, proportionalCeiling,
                                 candidate);
@@ -355,7 +352,7 @@ public class GroqServiceImpl implements GroqService {
 
         // NOTE: messages list yahan already SYSTEM_PROMPT ke saath ya bina
         // dono tarah se aa sakta hai (generateResponse me pehle se system
-        // add hota hai, streamResponse me nahi) — isliye system prompt ko
+        // add hota hai, streamResponse me nahi) Ã¢â‚¬â€ isliye system prompt ko
         // hamesha explicitly add karke estimate karte hain agar list me
         // pehle se system role wala message na ho, taaki double-count na ho.
         private int estimateConversationTokens(List<GroqMessage> messages) {

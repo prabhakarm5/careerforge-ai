@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * "Lightweight RAG" — this is intentionally NOT a vector/embeddings
+ * "Lightweight RAG" â€” this is intentionally NOT a vector/embeddings
  * pipeline. It's a cheap keyword-overlap retrieval over the conversation's
  * own message history, used ONLY when the user's message shows recall
  * intent ("remember", "yaad hai", "pehle bataya tha", etc).
@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
  *
  * If you later need true semantic recall (paraphrased recall, e.g. user
  * asks about something without using the same words), swap
- * retrieveRelevant()'s implementation for a pgvector similarity query —
+ * retrieveRelevant()'s implementation for a pgvector similarity query â€”
  * the call site in ChatServiceImpl doesn't need to change.
  */
 @Slf4j
@@ -55,7 +55,7 @@ public class MemoryRetrievalService {
 
     private static final Pattern RECALL_PATTERN_HI = Pattern.compile(
             "(?i)(yaad|pehle|purana|purani|bataya tha|kaha tha|kahaa tha|"
-                    + "humne baat ki thi|maine bola tha|maine kaha tha|"
+                    + "humne baat ki thi|hum log|hmlog|hamlog|kya baat kiye|maine bola tha|maine kaha tha|"
                     + "pichhli baar|wo jo maine|jo maine bataya)");
 
     private static final Set<String> STOPWORDS = Set.of(
@@ -65,7 +65,7 @@ public class MemoryRetrievalService {
             "hoga", "hota", "karo", "karna", "bhai", "wala", "wali");
 
     /**
-     * Cheap, fast check — regex only, no DB call. Call this first before
+     * Cheap, fast check â€” regex only, no DB call. Call this first before
      * doing any retrieval work.
      */
     public boolean isRecallIntent(String message) {

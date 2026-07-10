@@ -55,8 +55,8 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
     // Dynamic max_tokens sizing: chhota input -> chhota request, bada input ->
     // zyada room, hamesha ABSOLUTE_MAX_TOKENS aur model ke context window ke
     // andar.
-    private static final int ABSOLUTE_MAX_TOKENS = 8192;
-    private static final int MIN_TOKENS = 1024;
+    private static final int ABSOLUTE_MAX_TOKENS = 81920;
+    private static final int MIN_TOKENS = 40000;
 
     // Conservative default jab model ka apna context-window config me na mile.
     private static final int DEFAULT_ASSUMED_CONTEXT_WINDOW = 16000;

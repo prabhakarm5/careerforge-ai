@@ -182,6 +182,20 @@ public class WalletServiceImpl
                 walletTransactionRepository.save(transaction);
         }
 
+
+        private Wallet createMissingWalletAndReturn(String userId) {
+                try {
+                        createWallet(userId);
+                } catch (WalletAlreadyExistsException ignored) {
+                        // Concurrent dashboard/sidebar calls can both notice a missing cache.
+                        // If another request creates the wallet first, just read it below.
+                }
+
+                return walletRepository
+                                .findByUserId(userId)
+                                .orElseThrow(() -> new WalletNotFoundException(
+                                                "Wallet not found after auto-create"));
+        }
         // Get current wallet (via SecurityContext)
         //
         // FIX: ab REDIS-FIRST. Ye dashboard/wallet-page load pe call
@@ -209,8 +223,7 @@ public class WalletServiceImpl
                 // STEP-2: DATABASE (cache MISS)
                 Wallet wallet = walletRepository
                                 .findByUserId(user.getId())
-                                .orElseThrow(() -> new WalletNotFoundException(
-                                                "Wallet not found"));
+                                .orElseGet(() -> createMissingWalletAndReturn(user.getId()));
 
                 // STEP-3: SAVE CACHE
                 syncWalletCache(wallet);
@@ -258,8 +271,7 @@ public class WalletServiceImpl
                 // STEP-2: DATABASE (cache MISS)
                 Wallet wallet = walletRepository
                                 .findByUserId(userId)
-                                .orElseThrow(() -> new WalletNotFoundException(
-                                                "Wallet not found"));
+                                .orElseGet(() -> createMissingWalletAndReturn(userId));
 
                 // STEP-3: SAVE CACHE
                 syncWalletCache(wallet);
@@ -416,8 +428,7 @@ public class WalletServiceImpl
 
                 Wallet wallet = walletRepository
                                 .findByUserId(userId)
-                                .orElseThrow(() -> new WalletNotFoundException(
-                                                "Wallet not found"));
+                                .orElseGet(() -> createMissingWalletAndReturn(userId));
 
                 syncWalletCache(wallet);
 

@@ -24,20 +24,20 @@ public class OpenRouterConfig {
                  * OLD CODE:
                  *
                  * return WebClient.builder()
-                 *                 .baseUrl(properties.getBaseUrl())
-                 *                 .defaultHeader(HttpHeaders.AUTHORIZATION,
-                 *                                 "Bearer " + properties.getApiKey())
-                 *                 .defaultHeader(HttpHeaders.CONTENT_TYPE,
-                 *                                 MediaType.APPLICATION_JSON_VALUE)
-                 *                 .defaultHeader("HTTP-Referer",
-                 *                                 properties.getReferer())
-                 *                 .defaultHeader("X-Title",
-                 *                                 properties.getTitle())
-                 *                 .build();
+                 * .baseUrl(properties.getBaseUrl())
+                 * .defaultHeader(HttpHeaders.AUTHORIZATION,
+                 * "Bearer " + properties.getApiKey())
+                 * .defaultHeader(HttpHeaders.CONTENT_TYPE,
+                 * MediaType.APPLICATION_JSON_VALUE)
+                 * .defaultHeader("HTTP-Referer",
+                 * properties.getReferer())
+                 * .defaultHeader("X-Title",
+                 * properties.getTitle())
+                 * .build();
                  */
 
                 ExchangeStrategies strategies = ExchangeStrategies.builder()
-                                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(20 * 1024 * 1024))
+                                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(2000 * 1024 * 1024))
                                 .build();
 
                 return WebClient.builder()

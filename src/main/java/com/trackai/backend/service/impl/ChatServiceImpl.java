@@ -81,7 +81,7 @@ public class ChatServiceImpl implements ChatService {
         private static final Duration STREAM_TIMEOUT = Duration.ofMinutes(10);
         private static final long SSE_TIMEOUT_MS = STREAM_TIMEOUT.toMillis();
 
-        private static final int MAX_MEMORY_MESSAGES = 20;
+        private static final int MAX_MEMORY_MESSAGES = 40;
 
         private static final String EVENT_PING = "ping";
 
@@ -213,7 +213,7 @@ public class ChatServiceImpl implements ChatService {
                 }
         }
 
-        // NEW — dedicated helper to push a "thought" step to the client.
+        // NEW Ã¢â‚¬â€ dedicated helper to push a "thought" step to the client.
         // This is what powers the Claude-style "thinking trail" in the UI:
         // every real step the backend takes (reading context, searching
         // memory, picking a model, generating) gets narrated as it happens,
@@ -240,7 +240,7 @@ public class ChatServiceImpl implements ChatService {
 
         private static final String CONTINUATION_INSTRUCTION = "Continue your previous answer exactly from where it stopped. "
                         + "Do not repeat any earlier text, do not add any greeting, preamble, "
-                        + "or note about switching models — just continue the answer seamlessly "
+                        + "or note about switching models Ã¢â‚¬â€ just continue the answer seamlessly "
                         + "as if you were never interrupted.";
 
         // ===================== AUTH USER =====================
@@ -548,8 +548,6 @@ public class ChatServiceImpl implements ChatService {
 
                 List<GroqMessage> messages = buildConversationMemory(conversation.getId());
                 augmentWithRecalledContext(messages, conversation.getId(), request.getMessage());
-                messages.add(GroqMessage.builder().role("user").content(request.getMessage()).build());
-
                 boolean useOpenRouter = isOpenRouterModel(request.getModel());
                 String modelId = useOpenRouter
                                 ? resolveOpenRouterModelId(request.getModel())
@@ -646,8 +644,6 @@ public class ChatServiceImpl implements ChatService {
                 List<GroqMessage> memory = buildConversationMemory(conversation.getId());
                 boolean recalledContext = augmentWithRecalledContext(memory, conversation.getId(),
                                 request.getMessage());
-                memory.add(GroqMessage.builder().role("user").content(request.getMessage()).build());
-
                 boolean useOpenRouter = isOpenRouterModel(request.getModel());
                 String requestedModelId = useOpenRouter
                                 ? resolveOpenRouterModelId(request.getModel())
@@ -663,7 +659,7 @@ public class ChatServiceImpl implements ChatService {
                         meta.put("provider", useOpenRouter ? "OPENROUTER" : "GROQ");
                         emitter.send(SseEmitter.event().name("meta").data(objectMapper.writeValueAsString(meta)));
 
-                        // NEW — real thought trail (Claude-style), sent as
+                        // NEW Ã¢â‚¬â€ real thought trail (Claude-style), sent as
                         // distinct "thought" events instead of one generic
                         // "status" string the UI used to throw away.
                         sendThought(emitter, "Reading your message and conversation history");
@@ -901,7 +897,7 @@ public class ChatServiceImpl implements ChatService {
                 try {
                         finalizeStream(emitter, user, conversation, fullText, provider, model);
                 } catch (Exception e) {
-                        log.error("finalizeStream failed for conversation {} — sending best-effort done anyway",
+                        log.error("finalizeStream failed for conversation {} Ã¢â‚¬â€ sending best-effort done anyway",
                                         conversation.getId(), e);
                         Map<String, Object> done = new HashMap<>();
                         done.put("conversationId", conversation.getId());

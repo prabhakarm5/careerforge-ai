@@ -17,7 +17,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
-// NOTE: this file is UNCHANGED from what you already have — it was already
+// NOTE: this file is UNCHANGED from what you already have Ã¢â‚¬â€ it was already
 // correct. The crash in your logs was NOT coming from this filter; it was
 // coming from Spring Security's own built-in AuthorizationFilter re-running
 // on the SSE async-completion dispatch (see SecurityConfig.java for the
@@ -38,12 +38,15 @@ public class JwtFilter extends OncePerRequestFilter {
                 return path.startsWith("/api/auth/login")
                                 || path.startsWith("/api/auth/register")
                                 || path.startsWith("/api/auth/refresh-token")
+                                || path.startsWith("/api/auth/oauth-session")
                                 || path.startsWith("/api/auth/verify")
                                 || path.startsWith("/api/auth/resend-verification")
                                 || path.startsWith("/api/auth/forgot-password")
                                 || path.startsWith("/api/auth/verify-reset-otp")
                                 || path.startsWith("/api/auth/reset-password")
                                 || path.startsWith("/api/auth/resend-reset-otp")
+                                || path.startsWith("/oauth2/")
+                                || path.startsWith("/login/oauth2/")
                                 || path.startsWith("/api/plans");
         }
 
@@ -54,7 +57,7 @@ public class JwtFilter extends OncePerRequestFilter {
         // filter tries to write a 401 onto a response that has ALREADY been
         // committed and flushed as an SSE stream. Returning true (the
         // default OncePerRequestFilter behavior) keeps this filter OUT of
-        // the async redispatch — auth was already validated once when the
+        // the async redispatch Ã¢â‚¬â€ auth was already validated once when the
         // SSE connection opened, nothing needs re-checking on the
         // completion dispatch.
         @Override
@@ -89,8 +92,7 @@ public class JwtFilter extends OncePerRequestFilter {
 
                         String email = jwtUtil.extractEmail(token);
 
-                        if (email != null
-                                        && SecurityContextHolder.getContext().getAuthentication() == null) {
+                        if (email != null) {
 
                                 UserDetails userDetails = userDetailsService.loadUserByUsername(email);
 
@@ -106,12 +108,12 @@ public class JwtFilter extends OncePerRequestFilter {
 
                                         SecurityContextHolder.getContext().setAuthentication(authToken);
 
-                                        log.debug("Auth set for user: {}", email);
+                                        log.debug("JWT auth set for user: {}", email);
                                 }
                         }
 
                 } catch (Exception e) {
-                        log.warn("JWT validation failed for path: {} — {}",
+                        log.warn("JWT validation failed for path: {} Ã¢â‚¬â€ {}",
                                         request.getRequestURI(), e.getMessage());
                         sendUnauthorized(response, "Invalid or expired token");
                         return;
@@ -127,7 +129,7 @@ public class JwtFilter extends OncePerRequestFilter {
                 // throws IllegalStateException and shows up as a server-side
                 // crash log even though the client already got its full answer.
                 if (response.isCommitted()) {
-                        log.debug("Response already committed — skipping 401 write ({})", message);
+                        log.debug("Response already committed Ã¢â‚¬â€ skipping 401 write ({})", message);
                         return;
                 }
                 response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

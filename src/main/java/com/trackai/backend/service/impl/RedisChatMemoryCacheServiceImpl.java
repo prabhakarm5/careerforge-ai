@@ -25,21 +25,21 @@ public class RedisChatMemoryCacheServiceImpl implements RedisChatMemoryCacheServ
     private static final String MEMORY_PREFIX = "chat_memory:";
 
     /*
-     * Sirf last 20 hi rakhne hain (ChatServiceImpl.MAX_MEMORY_MESSAGES
-     * se match karta hai) — isse Redis list KABHI unbounded nahi
+     * Sirf last 40 hi rakhne hain (ChatServiceImpl.MAX_MEMORY_MESSAGES
+     * se match karta hai) â€” isse Redis list KABHI unbounded nahi
      * badhegi. Bill hamesha predictable rahega chahe conversation
      * mein 5 message ho ya 5000.
      */
-    private static final int MAX_MEMORY = 20;
+    private static final int MAX_MEMORY = 40;
 
     /*
      * Inactive conversation ki memory 2 ghante mein khud saaf ho
      * jaayegi. Active chat mein har READ pe TTL refresh hoti rahegi
-     * (sliding expiry) — isliye jab tak user active hai, memory
+     * (sliding expiry) â€” isliye jab tak user active hai, memory
      * kabhi expire nahi hogi. Isse Redis pe sirf ACTIVE
      * conversations ka data rehta hai, cold data apne aap gayab.
      */
-    private static final Duration TTL = Duration.ofHours(2);
+    private static final Duration TTL = Duration.ofHours(12);
 
     @Override
     public void appendMessage(String conversationId, GroqMessage message) {
@@ -50,7 +50,7 @@ public class RedisChatMemoryCacheServiceImpl implements RedisChatMemoryCacheServ
 
             redisTemplate.opsForList().rightPush(key, json);
 
-            // List ko hamesha last MAX_MEMORY tak trim rakho —
+            // List ko hamesha last MAX_MEMORY tak trim rakho â€”
             // ye O(1)-ish operation hai, list kabhi bada nahi hoga
             redisTemplate.opsForList().trim(key, -MAX_MEMORY, -1);
 
@@ -58,7 +58,7 @@ public class RedisChatMemoryCacheServiceImpl implements RedisChatMemoryCacheServ
 
         } catch (Exception e) {
             // DB save already ho chuka hota hai (ye method DB save
-            // ke baad call hoti hai) — silently log karo
+            // ke baad call hoti hai) â€” silently log karo
             log.error("Redis append failed (chat memory) for {}", conversationId, e);
         }
     }

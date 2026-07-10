@@ -74,12 +74,7 @@ public class UserAuthController {
                                 httpResponse,
                                 result.getRefreshToken(),
                                 refreshTokenExpiry);
-
-                // ✅ Access token — httpOnly cookie (ab body mein nahi jayega)
-                cookieUtil.addAccessTokenCookie(
-                                httpResponse,
-                                result.getAccessToken(),
-                                accessTokenExpiry);
+                // Access token response body mein rahega; frontend use in-memory store mein rakhega.
 
                 // ✅ Fingerprint — httpOnly cookie (refresh/logout ke waqt yahi se milega,
                 // request body mein dobara bhejne ki zaroorat nahi rahegi)

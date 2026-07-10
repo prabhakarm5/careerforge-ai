@@ -2,6 +2,7 @@ package com.trackai.backend.service.impl;
 
 import com.trackai.backend.dto.cache.CachedConversation;
 import com.trackai.backend.dto.chat.*;
+import com.trackai.backend.dto.cache.CachedUser;
 import com.trackai.backend.entity.Conversation;
 import com.trackai.backend.entity.User;
 import com.trackai.backend.enums.FeatureType;
@@ -11,10 +12,12 @@ import com.trackai.backend.repository.UserRepository;
 import com.trackai.backend.service.ConversationService;
 import com.trackai.backend.service.RedisChatMemoryCacheService;
 import com.trackai.backend.service.RedisConversationCacheService;
+import com.trackai.backend.service.RedisUserCacheService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -33,8 +36,10 @@ public class ConversationServiceImpl
 
         private final UserRepository userRepository;
 
+        private final RedisUserCacheService redisUserCacheService;
+
         // FIX (naya): ChatServiceImpl wala hi conversation metadata cache
-        // (same Redis key "conversation_cache:{id}") — isliye dono service
+        // (same Redis key "conversation_cache:{id}") â€” isliye dono service
         // ek hi cache share karte hain, consistent rehta hai. Yahan iska
         // use do jagah: (1) getConversation() mein DB findById() bachane
         // ke liye, (2) har mutation (archive/pin/rename etc) ke baad
@@ -44,7 +49,7 @@ public class ConversationServiceImpl
 
         // FIX (naya): jab conversation hi delete ho jaaye to uska
         // chat-memory (last-20 Redis LIST) bhi saath mein evict karna
-        // zaroori hai — warna orphan key Redis mein 2hr tak pada rahega
+        // zaroori hai â€” warna orphan key Redis mein 2hr tak pada rahega
         // (TTL khud saaf kar dega, lekin turant evict karna cleaner hai
         // aur agar kisi ne ussi conversationId se dobara chat try kiya
         // to purani/stale memory serve hone se bhi bachta hai).
@@ -58,11 +63,61 @@ public class ConversationServiceImpl
                                 .getContext()
                                 .getAuthentication();
 
-                String email = authentication.getName();
+                if (authentication == null
+                                || authentication instanceof AnonymousAuthenticationToken
+                                || !authentication.isAuthenticated()) {
+                        throw new RuntimeException("Please login again to load conversations");
+                }
 
-                return userRepository.findByEmail(email)
+                String email = authentication.getName();
+                if (email == null || email.isBlank() || "anonymousUser".equals(email)) {
+                        throw new RuntimeException("Please login again to load conversations");
+                }
+
+                email = email.trim().toLowerCase();
+
+                CachedUser cachedUser = redisUserCacheService.getUser(email);
+                if (cachedUser != null) {
+                        return User.builder()
+                                        .id(cachedUser.getId())
+                                        .name(cachedUser.getName())
+                                        .email(cachedUser.getEmail())
+                                        .role(cachedUser.getRole())
+                                        .enabled(cachedUser.getEnabled())
+                                        .blocked(cachedUser.getBlocked())
+                                        .emailVerified(cachedUser.getEmailVerified())
+                                        .mobileNumber(cachedUser.getMobileNumber())
+                                        .profileImage(cachedUser.getProfileImage())
+                                        .profileImagePublicId(cachedUser.getProfileImagePublicId())
+                                        .description(cachedUser.getDescription())
+                                        .createdAt(cachedUser.getCreatedAt())
+                                        .build();
+                }
+
+                User user = userRepository.findByEmail(email)
                                 .orElseThrow(() -> new RuntimeException(
-                                                "User not found"));
+                                                "Your session is valid but the user record was not found. Please login again."));
+
+                if (user.getRole() != com.trackai.backend.enums.Role.ROLE_ADMIN) {
+                        CachedUser cache = CachedUser.builder()
+                                        .id(user.getId())
+                                        .name(user.getName())
+                                        .email(user.getEmail())
+                                        .role(user.getRole())
+                                        .enabled(user.getEnabled())
+                                        .blocked(user.getBlocked())
+                                        .emailVerified(user.getEmailVerified())
+                                        .mobileNumber(user.getMobileNumber())
+                                        .profileImage(user.getProfileImage())
+                                        .profileImagePublicId(user.getProfileImagePublicId())
+                                        .description(user.getDescription())
+                                        .createdAt(user.getCreatedAt())
+                                        .build();
+
+                        redisUserCacheService.saveUser(cache);
+                }
+
+                return user;
         }
 
         private ConversationResponse mapToResponse(
@@ -82,7 +137,7 @@ public class ConversationServiceImpl
 
         // FIX (naya): Conversation entity -> CachedConversation, turant
         // Redis mein WRITE-THROUGH save. ChatServiceImpl ka hi
-        // syncConversationCache() — same shape, same key prefix, isliye
+        // syncConversationCache() â€” same shape, same key prefix, isliye
         // yahan se update hone ke turant baad chat flow bhi fresh data
         // dekhega (aur vice-versa).
         private void syncConversationCache(Conversation conversation) {
@@ -104,10 +159,10 @@ public class ConversationServiceImpl
         }
 
         // FIX (naya): mutation methods (archive/restore/rename/pin/unpin)
-        // ke liye — ye hamesha DB se hi fresh entity fetch karta hai
+        // ke liye â€” ye hamesha DB se hi fresh entity fetch karta hai
         // (cache se NAHI), kyunki humein turant .save() karna hai aur
         // JPA-managed entity chahiye (cache se banaya detached object
-        // save karna risky hai — dusre fields silently overwrite ho
+        // save karna risky hai â€” dusre fields silently overwrite ho
         // sakte hain). Cache sirf READ-ONLY fast-path (getConversation)
         // ke liye use hota hai, neeche dekho.
         private Conversation fetchConversationForMutation(String conversationId) {
@@ -121,13 +176,13 @@ public class ConversationServiceImpl
         public List<ConversationResponse> getRecentChats() {
 
                 // NOTE: List queries (recent/archived/search) jaanbujh kar
-                // cache NAHI kiye — ye per-user, filtered aur sorted list
+                // cache NAHI kiye â€” ye per-user, filtered aur sorted list
                 // hai. Single-key Redis cache mein daalne ka matlab hoga
                 // har chhote se mutation (naya msg aane pe updatedAt bump,
-                // pin/archive) pe puri list invalidate karna — jo list
+                // pin/archive) pe puri list invalidate karna â€” jo list
                 // cache ko DB query se zyada costly bana dega. Ye endpoint
                 // anyway chat ke hottest path (per-message) mein nahi hai,
-                // sirf sidebar load pe chalta hai — DB yahan theek hai.
+                // sirf sidebar load pe chalta hai â€” DB yahan theek hai.
                 User user = getAuthenticatedUser();
 
                 return conversationRepository
@@ -184,10 +239,10 @@ public class ConversationServiceImpl
         public ConversationDetailsResponse getConversation(
                         String conversationId) {
 
-                // FIX (naya): CACHE-FIRST — title/id ke liye pehle Redis
+                // FIX (naya): CACHE-FIRST â€” title/id ke liye pehle Redis
                 // check, DB findById() sirf cache-MISS pe. Messages
                 // hamesha DB se hi aayenge (poori history dikhani hai
-                // yahan, sirf last-20 wala "memory" list kaafi nahi hai —
+                // yahan, sirf last-20 wala "memory" list kaafi nahi hai â€”
                 // isliye chatMessageRepository wala part waisa hi rehne
                 // diya hai, koi shortcut nahi liya).
                 CachedConversation cachedConversation = redisConversationCacheService
@@ -212,7 +267,7 @@ public class ConversationServiceImpl
                                                         .orElseThrow(() -> new RuntimeException(
                                                                         conversationNOtFound));
 
-                        // cache-miss tha — turant hydrate kar do taaki agli
+                        // cache-miss tha â€” turant hydrate kar do taaki agli
                         // baar isi conversation ke liye cache-hit mile
                         syncConversationCache(conversation);
 
@@ -280,7 +335,7 @@ public class ConversationServiceImpl
                 conversationRepository.save(
                                 conversation);
 
-                // FIX: WRITE-THROUGH — archive hote hi cache turant refresh,
+                // FIX: WRITE-THROUGH â€” archive hote hi cache turant refresh,
                 // taaki getConversation() / chat flow stale "archived=false"
                 // na dekhe
                 syncConversationCache(conversation);
@@ -314,12 +369,12 @@ public class ConversationServiceImpl
                 conversationRepository.deleteById(
                                 conversationId);
 
-                // FIX (naya): conversation permanently delete ho gaya —
+                // FIX (naya): conversation permanently delete ho gaya â€”
                 // dono Redis footprint saaf karo. Nahi to:
                 // (1) conversation_cache:{id} 1hr tak stale pada rahega
                 // (koi harm nahi, but agar kisi tarah wahi ID reuse
                 // hua to galat data serve ho sakta hai)
-                // (2) chat_memory:{id} 2hr tak pada rahega — agar naya
+                // (2) chat_memory:{id} 2hr tak pada rahega â€” agar naya
                 // conversation kisi tarah wahi ID le le (practically
                 // nahi hota UUID ki wajah se, but hygiene ke liye
                 // turant evict karna sahi hai)
@@ -340,7 +395,7 @@ public class ConversationServiceImpl
                 conversationRepository.save(
                                 conversation);
 
-                // FIX: WRITE-THROUGH — naya title turant cache mein bhi,
+                // FIX: WRITE-THROUGH â€” naya title turant cache mein bhi,
                 // warna sidebar/chat kuch der purana title dikhata rahega
                 syncConversationCache(conversation);
         }

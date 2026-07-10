@@ -1,5 +1,5 @@
 # =====================================================================
-# application-common.yml — Shared config, IDENTICAL across dev & prod
+# application-common.yml â€” Shared config, IDENTICAL across dev & prod
 # =====================================================================
 # Rule of thumb used to decide what lives here vs in dev/prod:
 #   - Business logic, third-party API config, token economics, rate
@@ -45,7 +45,7 @@ app:
     initial-tokens: 100           # New user signup default token balance
 
   # ---------------------------------------
-  # ADMIN USER — auto-created on first startup
+  # ADMIN USER â€” auto-created on first startup
   # ---------------------------------------
   default-admin:
     email: ${ADMIN_EMAIL}
@@ -209,22 +209,22 @@ app:
       refill-minutes: 1
 
   # ---------------------------------------
-  # COOKIE SETTINGS — sab auth cookies (access, refresh, fingerprint)
+  # COOKIE SETTINGS â€” sab auth cookies (access, refresh, fingerprint)
   # yahi se control hoga, controller/util mein kahin bhi hardcode nahi
   #
-  # ✅ FIX — pehle ye block "app:" ke bahar, top-level "cookie:" ban gaya
-  # tha (galat indentation ki wajah se) — isliye Spring ko property
+  # âœ… FIX â€” pehle ye block "app:" ke bahar, top-level "cookie:" ban gaya
+  # tha (galat indentation ki wajah se) â€” isliye Spring ko property
   # "app.cookie.refresh-token-name" milti hi nahi thi, sirf
   # "cookie.refresh-token-name" milti thi -> app start hi nahi ho raha
   # tha (UnsatisfiedDependencyException on CookieUtil bean). Ab "app:"
   # ke andar, sahi 2-space indent ke saath.
   #
-  # ✅ FIX — path "/api/auth" se "/" kar diya. Access-token cookie sirf
+  # âœ… FIX â€” path "/api/auth" se "/" kar diya. Access-token cookie sirf
   # login/refresh response mein set hoti hai, lekin usko READ har ek
   # protected request pe (JwtAuthenticationFilter jaisa filter, jo
   # /api/chat, /api/wallet, /api/users, etc. sab pe chalta hai) karna
   # padta hai. Cookie ka "path" attribute browser ko batata hai ki
-  # cookie kis URL-prefix ke requests ke saath bhejni hai — agar
+  # cookie kis URL-prefix ke requests ke saath bhejni hai â€” agar
   # "/api/auth" rakhte to browser sirf /api/auth/** calls ke saath
   # cookie bhejta, baaki sab jagah (chat, wallet, user profile) cookie
   # missing milti aur wo saare authenticated calls 401 dete.
@@ -234,11 +234,43 @@ app:
     access-token-name: accessToken
     fingerprint-name: fingerprint
     path: /
-    same-site: Strict
-    secure: true
+    same-site: ${COOKIE_SAME_SITE:Strict}
+    secure: ${COOKIE_SECURE:true}
+
 
 # =========================================
-# CLOUDINARY — Media Storage
+# OAUTH2 LOGIN - Google / GitHub
+# =========================================
+# Callback URLs to add in provider consoles:
+# - Google: {BACKEND_URL}/login/oauth2/code/google
+# - GitHub: {BACKEND_URL}/login/oauth2/code/github
+# FRONTEND_URL must be only the app origin, for example http://localhost:5173
+# or https://your-frontend-domain.com, not /login.
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID:CHANGE_ME_GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET:CHANGE_ME_GOOGLE_CLIENT_SECRET}
+            scope:
+              - openid
+              - profile
+              - email
+          github:
+            client-id: ${GITHUB_CLIENT_ID:CHANGE_ME_GITHUB_CLIENT_ID}
+            client-secret: ${GITHUB_CLIENT_SECRET:CHANGE_ME_GITHUB_CLIENT_SECRET}
+            scope:
+              - read:user
+              - user:email
+        provider:
+          google:
+            user-name-attribute: sub
+          github:
+            user-name-attribute: id
+# =========================================
+# CLOUDINARY â€” Media Storage
 # =========================================
 cloudinary:
   cloud-name: ${CLOUDINARY_CLOUD_NAME}
@@ -246,7 +278,7 @@ cloudinary:
   api-secret: ${CLOUDINARY_API_SECRET}
 
 # =========================================
-# GROQ AI — LLM Inference (Multi-Model)
+# GROQ AI â€” LLM Inference (Multi-Model)
 # =========================================
 # Frontend model dropdown is populated from this list (/api/chat/models).
 # Only models with vision: true should allow image attachments.
@@ -288,7 +320,7 @@ groq:
       vision: false
 
 # =========================================
-# OPENROUTER — Chat and Image Models
+# OPENROUTER â€” Chat and Image Models
 # =========================================
 openrouter:
   api-key: ${OPENROUTER_API_KEY}
@@ -349,7 +381,7 @@ openrouter:
   title: TrackAI
 
 # =========================================
-# RAZORPAY — Payment Gateway
+# RAZORPAY â€” Payment Gateway
 # =========================================
 razorpay:
   key-id: ${RAZORPAY_KEY_ID}

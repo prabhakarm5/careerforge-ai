@@ -3,6 +3,9 @@ package com.trackai.backend.config;
 import com.trackai.backend.security.JwtAccessDeniedHandler;
 import com.trackai.backend.security.JwtAuthenticationEntryPoint;
 import com.trackai.backend.security.JwtFilter;
+import com.trackai.backend.security.OAuth2LoginFailureHandler;
+import com.trackai.backend.security.OAuth2LoginSuccessHandler;
+import com.trackai.backend.security.OAuth2UserInfoService;
 
 import jakarta.servlet.DispatcherType;
 
@@ -15,8 +18,6 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
@@ -37,19 +38,19 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  * Security's AuthorizationManager evaluates rules top-to-bottom and stops
  * at the first match.
  *
- * FIX — ASYNC DISPATCH CRASH (root cause of the AccessDeniedException /
+ * FIX â€” ASYNC DISPATCH CRASH (root cause of the AccessDeniedException /
  * "response already committed" errors you were seeing right when an SSE
  * chat stream finished):
  *
  * SseEmitter.complete() triggers Tomcat to run an ASYNC dispatch back
  * through the servlet/filter chain so the container can cleanly finalize
  * the response. JwtFilter correctly skips itself on that dispatch
- * (shouldNotFilterAsyncDispatch() -> true) — but Spring Security's OWN
+ * (shouldNotFilterAsyncDispatch() -> true) â€” but Spring Security's OWN
  * built-in AuthorizationFilter does NOT skip itself by default. It runs
  * again on that async dispatch, finds no SecurityContext (nothing set it
  * on this new dispatch, since JwtFilter deliberately didn't run), and
  * throws AccessDeniedException on a response that's already been fully
- * streamed and committed to the client — which Spring then can't even
+ * streamed and committed to the client â€” which Spring then can't even
  * turn into a clean error response, so the connection gets abruptly
  * reset instead of closing cleanly. That's exactly what corrupts the
  * end of a stream, breaks "done"/save events, and makes memory/history
@@ -59,7 +60,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  * and DispatcherType.ERROR, placed as the FIRST authorization rule (must
  * come before every other matcher, since Spring Security evaluates rules
  * top-to-bottom and stops at the first match). This does not weaken
- * security — it does not skip authentication for the original incoming
+ * security â€” it does not skip authentication for the original incoming
  * request (that still goes through JwtFilter + the
  * "anyRequest().authenticated()"
  * rule below on the INITIAL dispatch). It only stops Spring from
@@ -73,18 +74,9 @@ public class SecurityConfig {
         private final JwtFilter jwtFilter;
         private final JwtAuthenticationEntryPoint authenticationEntryPoint;
         private final JwtAccessDeniedHandler accessDeniedHandler;
-
-        /**
-         * BCrypt with explicit strength 12.
-         * Default no-arg constructor uses strength 10 — fine for demos, too weak
-         * for production. 12 rounds is the common production baseline: strong
-         * enough to resist offline brute force, cheap enough to not choke login
-         * latency under load.
-         */
-        @Bean
-        public PasswordEncoder passwordEncoder() {
-                return new BCryptPasswordEncoder(12);
-        }
+        private final OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
+        private final OAuth2LoginFailureHandler oAuth2LoginFailureHandler;
+        private final OAuth2UserInfoService oAuth2UserInfoService;
 
         @Bean
         public AuthenticationManager authenticationManager(
@@ -97,28 +89,28 @@ public class SecurityConfig {
 
                 http
 
-                                // ── CSRF ────────────────────────────────────────────────
+                                // â”€â”€ CSRF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                                 // Disabled: we are a stateless JWT API, not browser-session
                                 // based. CSRF tokens only matter when the browser auto-attaches
                                 // credentials (cookies). Razorpay's webhook POST also has no
                                 // CSRF token, so this must stay disabled for that call to work.
                                 .csrf(AbstractHttpConfigurer::disable)
 
-                                // ── CORS ────────────────────────────────────────────────
+                                // â”€â”€ CORS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                                 // Delegates to the CorsConfigurationSource bean (CorsConfig
-                                // class) — allowed origins/methods are defined there, NOT
+                                // class) â€” allowed origins/methods are defined there, NOT
                                 // here, so origin changes never require touching this file.
                                 .cors(cors -> {
                                 })
 
-                                // ── SESSIONS ────────────────────────────────────────────
-                                // No server-side session state — every request must carry
+                                // â”€â”€ SESSIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                                // JWT still protects API calls after login. OAuth2 briefly needs server-side state during provider redirect. Every API request must carry
                                 // a valid JWT. Required for horizontal scaling (multiple
                                 // Elastic Beanstalk instances, no sticky sessions needed).
                                 .sessionManagement(session -> session
-                                                .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                                                .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
 
-                                // ── AUTH ERROR HANDLING ─────────────────────────────────
+                                // â”€â”€ AUTH ERROR HANDLING â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                                 // Custom entry point / access-denied handler so we return
                                 // clean JSON (401/403) instead of Spring's default HTML
                                 // error pages or redirect-to-login behavior.
@@ -126,22 +118,22 @@ public class SecurityConfig {
                                                 .authenticationEntryPoint(authenticationEntryPoint)
                                                 .accessDeniedHandler(accessDeniedHandler))
 
-                                // ── FORM LOGIN / HTTP BASIC ─────────────────────────────
+                                // â”€â”€ FORM LOGIN / HTTP BASIC â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                                 // Explicitly disabled. Spring Security auto-configures a
-                                // default login page and basic-auth prompt if left enabled —
+                                // default login page and basic-auth prompt if left enabled â€”
                                 // both are dead weight and a minor attack surface on a
                                 // pure JSON REST API that only authenticates via JWT.
                                 .formLogin(AbstractHttpConfigurer::disable)
                                 .httpBasic(AbstractHttpConfigurer::disable)
 
-                                // ── SECURITY HEADERS ────────────────────────────────────
+                                // â”€â”€ SECURITY HEADERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                                 .headers(headers -> headers
                                                 // Prevent this API's responses from being framed by
                                                 // another origin (clickjacking protection). SAMEORIGIN
                                                 // is enough since we don't need cross-origin framing.
                                                 .frameOptions(frame -> frame.sameOrigin())
 
-                                                // Adds X-Content-Type-Options: nosniff — stops
+                                                // Adds X-Content-Type-Options: nosniff â€” stops
                                                 // browsers from MIME-sniffing responses into an
                                                 // executable type they weren't served as.
                                                 .contentTypeOptions(contentType -> {
@@ -158,24 +150,24 @@ public class SecurityConfig {
                                                 // subdomains. Spring only actually sends this header
                                                 // on responses that were served over HTTPS, so it's
                                                 // safe to leave on even while still behind the plain
-                                                // HTTP Elastic Beanstalk default URL — it becomes
+                                                // HTTP Elastic Beanstalk default URL â€” it becomes
                                                 // fully active the moment ACM/HTTPS + custom domain
                                                 // are added, with zero code changes needed then.
                                                 .httpStrictTransportSecurity(hsts -> hsts
                                                                 .includeSubDomains(true)
                                                                 .maxAgeInSeconds(31536000)))
 
-                                // ── AUTHORIZATION RULES ─────────────────────────────────
+                                // â”€â”€ AUTHORIZATION RULES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                                 .authorizeHttpRequests(auth -> auth
 
-                                                // ⬇️ MUST BE THE VERY FIRST RULE. Spring Security
+                                                // â¬‡ï¸ MUST BE THE VERY FIRST RULE. Spring Security
                                                 // evaluates matchers top-to-bottom and stops at the
                                                 // first match, so this has to win before any other
                                                 // rule gets a chance to run "anyRequest().authenticated()"
                                                 // against the container's internal ASYNC/ERROR
                                                 // dispatch of an SSE stream that already finished.
                                                 // See the class-level Javadoc above for the full
-                                                // explanation — this is the actual fix for the
+                                                // explanation â€” this is the actual fix for the
                                                 // AccessDeniedException / "response already
                                                 // committed" crash at the end of every chat stream.
                                                 .dispatcherTypeMatchers(
@@ -183,7 +175,7 @@ public class SecurityConfig {
                                                                 DispatcherType.ERROR)
                                                 .permitAll()
 
-                                                // Public auth endpoints — no token exists yet at
+                                                // Public auth endpoints â€” no token exists yet at
                                                 // login/register/otp/refresh time, so these must
                                                 // stay open.
                                                 .requestMatchers(
@@ -199,16 +191,19 @@ public class SecurityConfig {
                                                                 "/api/auth/verify-admin-login-otp",
                                                                 "/api/auth/resend-admin-login-otp",
                                                                 "/api/auth/refresh-token",
+                                                                "/api/auth/oauth-session",
+                                                                "/oauth2/**",
+                                                                "/login/oauth2/**",
                                                                 "/api/plans",
                                                                 "/api/plans/**")
                                                 .permitAll()
 
                                                 // Elastic Beanstalk hits this endpoint (unauthenticated)
-                                                // to determine instance health — must be public or
+                                                // to determine instance health â€” must be public or
                                                 // EB will mark healthy instances as down.
                                                 .requestMatchers("/actuator/health").permitAll()
 
-                                                // API docs — harmless to expose publicly, useful for
+                                                // API docs â€” harmless to expose publicly, useful for
                                                 // frontend/mobile devs integrating against the API.
                                                 // Remove/lock these down if the API is not meant to
                                                 // be publicly discoverable in production.
@@ -217,18 +212,18 @@ public class SecurityConfig {
                                                                 "/v3/api-docs/**")
                                                 .permitAll()
 
-                                                // RAZORPAY WEBHOOK — must stay PUBLIC.
+                                                // RAZORPAY WEBHOOK â€” must stay PUBLIC.
                                                 // Razorpay calls this server-to-server with NO JWT,
                                                 // so it can never satisfy hasAnyRole("USER","ADMIN")
                                                 // below. Security here comes entirely from HMAC
                                                 // signature verification inside handleWebhook()
                                                 // (Utils.verifyWebhookSignature using
-                                                // RAZORPAY_WEBHOOK_SECRET) — NOT from Spring auth.
+                                                // RAZORPAY_WEBHOOK_SECRET) â€” NOT from Spring auth.
                                                 //
                                                 // ORDER MATTERS: this matcher MUST be declared BEFORE
                                                 // the broader "/api/payment/**" rule below. Spring
                                                 // Security evaluates matchers top-to-bottom and stops
-                                                // at the first match — if this line were moved after
+                                                // at the first match â€” if this line were moved after
                                                 // "/api/payment/**", the webhook would fall under the
                                                 // authenticated rule instead and every Razorpay
                                                 // callback would get rejected with 401/403.
@@ -254,9 +249,16 @@ public class SecurityConfig {
 
                                                 // Default-deny: anything not explicitly listed above
                                                 // requires a valid authenticated JWT. This is the
-                                                // safety net — new endpoints are secure-by-default
+                                                // safety net â€” new endpoints are secure-by-default
                                                 // unless someone deliberately opens them up.
                                                 .anyRequest().authenticated())
+
+                                // OAuth2 success creates the same JWT cookie session as password login.
+                                .oauth2Login(oauth2 -> oauth2
+                                                .userInfoEndpoint(userInfo -> userInfo
+                                                                .userService(oAuth2UserInfoService))
+                                                .successHandler(oAuth2LoginSuccessHandler)
+                                                .failureHandler(oAuth2LoginFailureHandler))
 
                                 // JWT filter runs before Spring's own username/password
                                 // filter so requests are authenticated from the token before
