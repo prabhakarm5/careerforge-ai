@@ -56,7 +56,7 @@ public class MemoryRetrievalService {
     private static final Pattern RECALL_PATTERN_HI = Pattern.compile(
             "(?i)(yaad|pehle|purana|purani|bataya tha|kaha tha|kahaa tha|"
                     + "humne baat ki thi|hum log|hmlog|hamlog|kya baat kiye|maine bola tha|maine kaha tha|"
-                    + "pichhli baar|wo jo maine|jo maine bataya)");
+                    + "pichhla|pichla|pichhli baar|wo jo maine|jo maine bataya)");
 
     private static final Set<String> STOPWORDS = Set.of(
             "what", "when", "where", "which", "about", "there", "their", "would",

@@ -23,4 +23,7 @@ public class SendMessageRequest {
     // Optional base64 / data-URL image, only honoured when the resolved
     // model has vision: true in application.yml. Ignored otherwise.
     private String image;
+
+    // Optional user preference: concise (default) or balanced.
+    private String responseStyle;
 }

@@ -81,7 +81,7 @@ public class ChatServiceImpl implements ChatService {
         private static final Duration STREAM_TIMEOUT = Duration.ofMinutes(10);
         private static final long SSE_TIMEOUT_MS = STREAM_TIMEOUT.toMillis();
 
-        private static final int MAX_MEMORY_MESSAGES = 40;
+        private static final int MAX_MEMORY_MESSAGES = 60;
 
         private static final String EVENT_PING = "ping";
 
@@ -122,9 +122,12 @@ public class ChatServiceImpl implements ChatService {
                 this.redisChatMemoryCacheService = redisChatMemoryCacheService;
 
                 this.streamExecutor = new ThreadPoolTaskExecutor();
-                this.streamExecutor.setCorePoolSize(10);
-                this.streamExecutor.setMaxPoolSize(50);
-                this.streamExecutor.setQueueCapacity(1000);
+                // Keep idle CPU and thread memory low on small production instances.
+                this.streamExecutor.setCorePoolSize(2);
+                this.streamExecutor.setMaxPoolSize(16);
+                this.streamExecutor.setQueueCapacity(200);
+                this.streamExecutor.setKeepAliveSeconds(30);
+                this.streamExecutor.setAllowCoreThreadTimeOut(true);
                 this.streamExecutor.setThreadNamePrefix("trackai-stream-");
                 this.streamExecutor.setWaitForTasksToCompleteOnShutdown(true);
                 this.streamExecutor.setAwaitTerminationSeconds(30);
@@ -158,7 +161,7 @@ public class ChatServiceImpl implements ChatService {
         private void registerEmitterCallbacks(String conversationId, SseEmitter emitter) {
 
                 emitter.onCompletion(() -> {
-                        log.info("SSE completed {}", conversationId);
+                        log.debug("SSE completed {}", conversationId);
                         completeEmitter(emitter, conversationId);
                 });
 
@@ -485,6 +488,16 @@ public class ChatServiceImpl implements ChatService {
                 return true;
         }
 
+
+        private void applyResponseStyle(List<GroqMessage> memory, String responseStyle) {
+                String style = responseStyle == null ? "concise" : responseStyle.trim().toLowerCase();
+                String instruction = "balanced".equals(style)
+                                ? "Answer clearly with useful detail, but avoid repetition and unnecessary sections."
+                                : "Keep the answer concise and direct. Prefer 2-6 short bullets or a brief paragraph. "
+                                                + "Stay under roughly 250 words unless the user explicitly asks for detailed code, "
+                                                + "a long document, or a comprehensive explanation.";
+                memory.add(0, GroqMessage.builder().role("system").content(instruction).build());
+        }
         private int estimateTokens(String text) {
                 if (text == null || text.isEmpty())
                         return 0;
@@ -548,6 +561,7 @@ public class ChatServiceImpl implements ChatService {
 
                 List<GroqMessage> messages = buildConversationMemory(conversation.getId());
                 augmentWithRecalledContext(messages, conversation.getId(), request.getMessage());
+                applyResponseStyle(messages, request.getResponseStyle());
                 boolean useOpenRouter = isOpenRouterModel(request.getModel());
                 String modelId = useOpenRouter
                                 ? resolveOpenRouterModelId(request.getModel())
@@ -644,6 +658,7 @@ public class ChatServiceImpl implements ChatService {
                 List<GroqMessage> memory = buildConversationMemory(conversation.getId());
                 boolean recalledContext = augmentWithRecalledContext(memory, conversation.getId(),
                                 request.getMessage());
+                applyResponseStyle(memory, request.getResponseStyle());
                 boolean useOpenRouter = isOpenRouterModel(request.getModel());
                 String requestedModelId = useOpenRouter
                                 ? resolveOpenRouterModelId(request.getModel())
@@ -655,19 +670,19 @@ public class ChatServiceImpl implements ChatService {
                         meta.put("conversationId", conversation.getId());
                         meta.put("title", conversation.getTitle());
                         meta.put("isNew", isNewConversation);
-                        meta.put("model", requestedModelId);
-                        meta.put("provider", useOpenRouter ? "OPENROUTER" : "GROQ");
                         emitter.send(SseEmitter.event().name("meta").data(objectMapper.writeValueAsString(meta)));
 
-                        // NEW Ã¢â‚¬â€ real thought trail (Claude-style), sent as
-                        // distinct "thought" events instead of one generic
-                        // "status" string the UI used to throw away.
-                        sendThought(emitter, "Reading your message and conversation history");
-                        if (recalledContext) {
-                                sendThought(emitter, "Searching earlier messages for relevant context");
+                        // User-facing progress describes real work, never internal routing details.
+                        sendThought(emitter, "Understanding your request");
+                        sendThought(emitter, "Reviewing the current conversation");
+                        if (imageBase64 != null && !imageBase64.isBlank()) {
+                                sendThought(emitter, "Analyzing the attached image");
                         }
-                        sendThought(emitter, "Selected model: " + requestedModelId);
-                        sendThought(emitter, "Generating response");
+                        if (recalledContext) {
+                                sendThought(emitter, "Checking relevant details from earlier messages");
+                        }
+                        sendThought(emitter, "Planning a clear response");
+                        sendThought(emitter, "Writing the answer");
                 } catch (Exception e) {
                         log.warn("Failed to send meta event", e);
                 }
@@ -862,14 +877,11 @@ public class ChatServiceImpl implements ChatService {
                         Map<String, Object> switched = new HashMap<>();
                         switched.put("from", fromModel);
                         switched.put("to", toModel);
-                        switched.put("message",
-                                        "\"" + fromModel + "\" stopped responding midway. "
-                                                        + "Switched to \"" + toModel
-                                                        + "\" automatically to continue the same answer.");
+                        switched.put("message", "A temporary AI service delay occurred. Continuing your answer automatically.");
                         emitter.send(SseEmitter.event()
                                         .name("model_switched")
                                         .data(objectMapper.writeValueAsString(switched)));
-                        sendThought(emitter, "Switched to " + toModel + " to keep going");
+                        sendThought(emitter, "Continuing after a temporary service delay");
                 } catch (Exception ignored) {
                 }
         }

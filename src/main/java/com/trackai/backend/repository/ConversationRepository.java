@@ -14,6 +14,8 @@ import java.util.List;
 public interface ConversationRepository
                 extends JpaRepository<Conversation, String> {
 
+        boolean existsByIdAndUserId(String id, String userId);
+
         List<Conversation>
 
                         findByUserIdAndArchivedFalseOrderByUpdatedAtDesc(

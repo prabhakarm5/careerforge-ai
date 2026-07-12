@@ -30,7 +30,7 @@ public class RedisChatMemoryCacheServiceImpl implements RedisChatMemoryCacheServ
      * badhegi. Bill hamesha predictable rahega chahe conversation
      * mein 5 message ho ya 5000.
      */
-    private static final int MAX_MEMORY = 40;
+    private static final int MAX_MEMORY = 60;
 
     /*
      * Inactive conversation ki memory 2 ghante mein khud saaf ho
@@ -72,11 +72,11 @@ public class RedisChatMemoryCacheServiceImpl implements RedisChatMemoryCacheServ
             List<String> raw = redisTemplate.opsForList().range(key, 0, -1);
 
             if (raw == null || raw.isEmpty()) {
-                log.info("Redis Cache MISS (chat memory) : {}", key);
+                log.debug("Redis Cache MISS (chat memory) : {}", key);
                 return null;
             }
 
-            log.info("Redis Cache HIT (chat memory) : {} ({} messages)", key, raw.size());
+            log.debug("Redis Cache HIT (chat memory) : {} ({} messages)", key, raw.size());
 
             // Active hai, isliye TTL refresh kar do (sliding expiry)
             redisTemplate.expire(key, TTL);
@@ -114,7 +114,7 @@ public class RedisChatMemoryCacheServiceImpl implements RedisChatMemoryCacheServ
             redisTemplate.opsForList().trim(key, -MAX_MEMORY, -1);
             redisTemplate.expire(key, TTL);
 
-            log.info("Chat memory hydrated from DB : {} ({} messages)", key, messages.size());
+            log.debug("Chat memory hydrated from DB : {} ({} messages)", key, messages.size());
 
         } catch (Exception e) {
             log.error("Redis hydrate failed (chat memory) for {}", conversationId, e);

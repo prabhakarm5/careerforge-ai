@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/conversations")
@@ -49,6 +50,14 @@ public class ConversationController {
                                                                 keyword));
         }
 
+        // Lightweight active-chat check used for cross-device deletion sync.
+        @GetMapping("/{conversationId}/status")
+        public ResponseEntity<Map<String, Boolean>> getConversationStatus(
+                        @PathVariable String conversationId) {
+                return ResponseEntity.ok(Map.of(
+                                "exists",
+                                conversationService.conversationExists(conversationId)));
+        }
         // Load Complete Conversation
         @GetMapping("/{conversationId}")
         public ResponseEntity<ConversationDetailsResponse> getConversation(

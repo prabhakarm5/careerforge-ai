@@ -120,6 +120,14 @@ public class ConversationServiceImpl
                 return user;
         }
 
+        @Override
+        public boolean conversationExists(String conversationId) {
+                if (conversationId == null || conversationId.isBlank()) {
+                        return false;
+                }
+                User user = getAuthenticatedUser();
+                return conversationRepository.existsByIdAndUserId(conversationId, user.getId());
+        }
         private ConversationResponse mapToResponse(
                         Conversation conversation) {
 

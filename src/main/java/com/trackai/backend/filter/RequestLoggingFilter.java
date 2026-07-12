@@ -31,7 +31,8 @@ public class RequestLoggingFilter extends OncePerRequestFilter {
 
             long duration = System.currentTimeMillis() - start;
 
-            log.info(
+            // Async SSE dispatches are routine; DEBUG avoids noisy production logs.
+            log.debug(
                     "{} {} | Status={} | Time={}ms | IP={}",
                     request.getMethod(),
                     request.getRequestURI(),

@@ -10,6 +10,8 @@ public interface ConversationService {
 
         List<ConversationResponse> getRecentChats();
 
+        boolean conversationExists(String conversationId);
+
         List<ConversationResponse> getArchivedChats();
 
         List<ConversationResponse> searchChats(

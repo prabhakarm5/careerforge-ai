@@ -88,9 +88,7 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
     // tight hai — ye sirf tab trigger hoga jab model instruction ke bawajood
     // bhi limit se zyada likhne ki koshish kare.)
     private static final String TRUNCATION_NOTE = "\n\n---\n"
-            + "_⚠️ Yeh jawaab bahut lamba tha isliye poora ek saath nahi de paaya — "
-            + "itna bada code/answer ek single response mein possible nahi hai. "
-            + "Agla part chahiye to bas **\"continue\"** likh dijiye._";
+            + "_The response reached its available answer budget. I kept the result complete and concise; ask for a specific section if you need more detail._";
 
     @Override
     public ChatResponse generateResponse(List<GroqMessage> messages, String modelId) {
@@ -408,22 +406,22 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
 
         if (statusCode == 402
                 || containsAny(providerMessage, "insufficient", "credit", "balance", "payment required")) {
-            return "OPENROUTER_INSUFFICIENT_CREDITS: OpenRouter account/model par credits khatam ya insufficient hain. "
-                    + "OpenRouter dashboard me balance check karein. Detail: " + providerMessage;
+            return "OPENROUTER_INSUFFICIENT_CREDITS: The OpenRouter account or model has insufficient credits. "
+                    + "Check the OpenRouter dashboard balance. Detail: " + providerMessage;
         }
 
         if (statusCode == 429 || containsAny(providerMessage, "rate limit", "too many requests")) {
-            return "OPENROUTER_RATE_LIMIT: OpenRouter/model abhi rate-limited hai (free models par common hai). "
-                    + "Thodi der baad phir try karein. Detail: " + providerMessage;
+            return "OPENROUTER_RATE_LIMIT: The OpenRouter model is temporarily rate-limited. "
+                    + "Please try again shortly. Detail: " + providerMessage;
         }
 
         if (statusCode == 401 || statusCode == 403) {
-            return "OPENROUTER_AUTH_ERROR: OpenRouter API key invalid ya unauthorized hai. Detail: " + providerMessage;
+            return "OPENROUTER_AUTH_ERROR: The OpenRouter API key is invalid or unauthorized. Detail: " + providerMessage;
         }
 
         if (statusCode == 503 || statusCode == 502) {
-            return "OPENROUTER_PROVIDER_UNAVAILABLE: Is model ka upstream provider abhi unavailable hai. "
-                    + "Doosra model try karein ya thodi der baad retry karein. Detail: " + providerMessage;
+            return "OPENROUTER_PROVIDER_UNAVAILABLE: The upstream provider for this model is temporarily unavailable. "
+                    + "Try another model or retry shortly. Detail: " + providerMessage;
         }
 
         return "OPENROUTER_ERROR (HTTP " + statusCode + "): "
