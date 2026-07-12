@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  DOCKER_IMAGE: prabhakar7277/trackai-backend
+
 jobs:
   docker-deploy:
     runs-on: ubuntu-latest
@@ -20,19 +24,25 @@ jobs:
           password: ${{ secrets.DOCKER_TOKEN }}
 
       - name: Build Docker Image
-        run: docker build -t prabhakar7277/trackai-backend:latest .
+        run: |
+          docker build \
+            -t $DOCKER_IMAGE:${{ github.sha }} \
+            -t $DOCKER_IMAGE:latest \
+            .
 
       - name: Push Docker Image
-        run: docker push prabhakar7277/trackai-backend:latest
+        run: |
+          docker push $DOCKER_IMAGE:${{ github.sha }}
+          docker push $DOCKER_IMAGE:latest
 
       - name: Create Elastic Beanstalk Bundle
         run: |
           mkdir deploy
-          cat > deploy/Dockerrun.aws.json << 'EOF'
+          cat > deploy/Dockerrun.aws.json << EOF
           {
             "AWSEBDockerrunVersion": "1",
             "Image": {
-              "Name": "prabhakar7277/trackai-backend:latest",
+              "Name": "$DOCKER_IMAGE:${{ github.sha }}",
               "Update": "true"
             },
             "Ports": [
