@@ -245,10 +245,11 @@ public class SecurityConfig {
                                                 .hasAnyRole("USER", "ADMIN")
 
                                                 // User-only surface.
-                                                .requestMatchers("/api/users/**").hasRole("USER")
+                                                .requestMatchers("/api/users/**").hasAnyRole("USER", "ADMIN")
 
                                                 // Default-deny: anything not explicitly listed above
                                                 // requires a valid authenticated JWT. This is the
+                                                
                                                 // safety net â€” new endpoints are secure-by-default
                                                 // unless someone deliberately opens them up.
                                                 .anyRequest().authenticated())

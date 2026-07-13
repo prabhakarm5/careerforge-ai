@@ -8,7 +8,9 @@ import lombok.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "wallet_transactions")
+@Table(name = "wallet_transactions", indexes = {
+        @Index(name = "idx_wallet_tx_user_created", columnList = "user_id, created_at")
+})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -19,7 +21,7 @@ public class WalletTransaction {
     @Id
     private String id;
 
-    @Column(nullable = false)
+    @Column(name = "user_id", nullable = false)
     private String userId;
 
     @Column(nullable = false)
@@ -60,6 +62,7 @@ public class WalletTransaction {
     // private String description;
 
     @Builder.Default
+    @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
     /*

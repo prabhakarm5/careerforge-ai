@@ -1,6 +1,7 @@
 package com.trackai.backend.service.impl;
 
 import com.trackai.backend.dto.WalletResponse;
+import com.trackai.backend.security.JwtUserPrincipal;
 import com.trackai.backend.dto.WalletTransactionResponse;
 import com.trackai.backend.dto.cache.CachedUser;
 import com.trackai.backend.dto.cache.CachedWallet;
@@ -25,6 +26,7 @@ import jakarta.transaction.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -73,6 +75,16 @@ public class WalletServiceImpl
                                 .getAuthentication();
 
                 String email = authentication.getName();
+
+                // Fast path for current access tokens: identity is already signed into JWT.
+                if (authentication.getPrincipal() instanceof JwtUserPrincipal principal
+                                && principal.userId() != null && !principal.userId().isBlank()) {
+                        return User.builder()
+                                        .id(principal.userId())
+                                        .email(principal.email())
+                                        .role(com.trackai.backend.enums.Role.valueOf(principal.role()))
+                                        .build();
+                }
 
                 // STEP-1: REDIS
                 CachedUser cachedUser = redisUserCacheService.getUser(email);
@@ -449,7 +461,7 @@ public class WalletServiceImpl
                 User user = getAuthenticatedUser();
 
                 return walletTransactionRepository
-                                .findByUserIdOrderByCreatedAtDesc(user.getId())
+                                .findByUserIdOrderByCreatedAtDesc(user.getId(), PageRequest.of(0, 100))
                                 .stream()
                                 .map(transaction -> WalletTransactionResponse.builder()
                                                 .amount(transaction.getAmount())

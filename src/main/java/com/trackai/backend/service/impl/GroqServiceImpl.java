@@ -5,6 +5,7 @@ import com.trackai.backend.config.GroqModelConfig;
 import com.trackai.backend.dto.chat.ChatResponse;
 import com.trackai.backend.dto.groq.*;
 import com.trackai.backend.exception.GroqRateLimitException;
+import com.trackai.backend.service.ChatResponsePolicy;
 import com.trackai.backend.service.GroqService;
 import io.netty.channel.ChannelOption;
 import io.netty.handler.timeout.ReadTimeoutHandler;
@@ -53,7 +54,7 @@ public class GroqServiceImpl implements GroqService {
         // zyada room, hÃ Â¤Â®Ã Â¥â€¡Ã Â¤Â¶Ã Â¤Â¾ ABSOLUTE_MAX_TOKENS aur model ke context window
         // ke andar.
         private static final int ABSOLUTE_MAX_TOKENS = 8192;
-        private static final int MIN_TOKENS = 1024;
+        private static final int MIN_TOKENS = 16;
         private static final int DEFAULT_ASSUMED_CONTEXT_WINDOW = 8192;
         private static final int CHARS_PER_TOKEN_ESTIMATE = 4;
 
@@ -78,16 +79,20 @@ public class GroqServiceImpl implements GroqService {
         private static final String SYSTEM_PROMPT = """
                         You are CareerForge AI, a knowledgeable and helpful assistant.
 
-                        How to respond:
-                        - Auto-detect the user's language. If the user writes Hindi/Hinglish, answer in Hindi/Hinglish. If the user writes English, answer in English.
-                        - Give the most complete answer possible in one response. If the user asks for code, a page, or a file, provide a compact but complete working version instead of asking the user to type continue.
-                        - Use rich Markdown formatting: short headings, bullets, numbered steps, tables, and code blocks when useful. Make the answer visually easy to scan.
-                        - When helpful, briefly show visible progress sections such as "What I checked", "What I found", and "Next steps". Do not claim web search unless a web search tool was actually used.
-                        - Never pad an answer with filler, generic disclaimers, or repeated points just to sound longer. Every sentence should add real information.
-                        - For code questions: always provide complete, working, copy-pasteable code in proper markdown code blocks with the correct language tag.
-                        - Always finish your answer cleanly; never stop mid-sentence or mid-list, and never tell the user to type continue as the main solution.
-                        - If an image is attached, describe/analyze it carefully before answering.
-                        - NEVER say you are LLaMA, GPT, DeepSeek, or any other underlying model. You are CareerForge AI.
+                        Response rules:
+                        - The latest user message is the active instruction. Its requested language, output format,
+                          and length override earlier tasks. Never continue an earlier artifact unless asked now.
+                        - Match the latest user's language. Be concise by default: usually 1-4 sentences and under
+                          120 words.
+                        - Use headings, lists, tables, and code blocks only when they help the current request.
+                        - For an ambiguous short follow-up, ask one short context-aware question. Do not guess a new
+                          task, repeat an old answer, or dump code.
+                        - If the user asks for an exact reply such as "only say yes", output exactly that and nothing
+                          else.
+                        - For explicit code/file/page requests, provide a compact complete working result and finish
+                          cleanly. Never output mojibake, giant data URLs, or claims of web search that did not happen.
+                        - If an image is attached, analyze it before answering.
+                        - Never identify yourself as an underlying model. You are CareerForge AI.
                         """;
 
         private WebClient client() {
@@ -326,35 +331,17 @@ public class GroqServiceImpl implements GroqService {
         // rahe.
         private int computeDynamicMaxTokens(List<GroqMessage> messages, String modelId) {
                 int estimatedInputTokens = estimateConversationTokens(messages);
-
                 int contextWindow = resolveContextWindow(modelId);
-
                 int safetyBuffer = Math.max(64, (int) (contextWindow * 0.05));
-                int roomForOutput = contextWindow - estimatedInputTokens - safetyBuffer;
+                int roomForOutput = Math.max(MIN_TOKENS, contextWindow - estimatedInputTokens - safetyBuffer);
+                int requested = ChatResponsePolicy.recommendedMaxOutputTokens(messages, ABSOLUTE_MAX_TOKENS);
+                int candidate = Math.max(MIN_TOKENS, Math.min(requested, roomForOutput));
 
-                int proportionalCeiling = Math.max(MIN_TOKENS, estimatedInputTokens * 2);
-
-                int candidate = Math.min(roomForOutput, proportionalCeiling);
-                candidate = Math.min(candidate, ABSOLUTE_MAX_TOKENS);
-                candidate = Math.max(candidate, MIN_TOKENS);
-
-                if (candidate < MIN_TOKENS) {
-                        candidate = MIN_TOKENS;
-                }
-
-                log.debug("Dynamic max_tokens calc Ã¢â‚¬â€ model={}, contextWindow={}, estimatedInput={}, "
-                                + "roomForOutput={}, proportionalCeiling={}, final={}",
-                                modelId, contextWindow, estimatedInputTokens, roomForOutput, proportionalCeiling,
-                                candidate);
-
+                log.debug("Dynamic max_tokens calc - model={}, contextWindow={}, estimatedInput={}, "
+                                + "roomForOutput={}, requested={}, final={}",
+                                modelId, contextWindow, estimatedInputTokens, roomForOutput, requested, candidate);
                 return candidate;
         }
-
-        // NOTE: messages list yahan already SYSTEM_PROMPT ke saath ya bina
-        // dono tarah se aa sakta hai (generateResponse me pehle se system
-        // add hota hai, streamResponse me nahi) Ã¢â‚¬â€ isliye system prompt ko
-        // hamesha explicitly add karke estimate karte hain agar list me
-        // pehle se system role wala message na ho, taaki double-count na ho.
         private int estimateConversationTokens(List<GroqMessage> messages) {
                 boolean hasSystemMessage = messages != null && messages.stream()
                                 .anyMatch(m -> "system".equalsIgnoreCase(m.getRole()));

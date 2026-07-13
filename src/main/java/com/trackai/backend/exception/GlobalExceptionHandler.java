@@ -40,6 +40,33 @@ public class GlobalExceptionHandler {
                                 .build();
         }
 
+        @ExceptionHandler(ResumeProcessingException.class)
+        public ResponseEntity<ErrorResponse> handleResumeProcessing(
+                        ResumeProcessingException ex,
+                        HttpServletRequest request) {
+                HttpStatus status = ex.getStatus();
+                return new ResponseEntity<>(
+                                buildResponse(status, "Resume Processing Error", ex.getMessage(), request),
+                                status);
+        }
+        @ExceptionHandler(PromoCodeException.class)
+        public ResponseEntity<ErrorResponse> handlePromoCode(
+                        PromoCodeException ex,
+                        HttpServletRequest request) {
+                HttpStatus status = ex.getStatus();
+                return new ResponseEntity<>(
+                                buildResponse(status, "Promo Code Error", ex.getMessage(), request),
+                                status);
+        }
+        @ExceptionHandler(JobSearchException.class)
+        public ResponseEntity<ErrorResponse> handleJobSearch(
+                        JobSearchException ex,
+                        HttpServletRequest request) {
+                HttpStatus status = ex.getStatus();
+                return new ResponseEntity<>(
+                                buildResponse(status, "Job Search Error", ex.getMessage(), request),
+                                status);
+        }
         // VALIDATION ERRORS -> 400
         @ExceptionHandler(MethodArgumentNotValidException.class)
         public ResponseEntity<ErrorResponse> handleValidationExceptions(

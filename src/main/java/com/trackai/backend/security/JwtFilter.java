@@ -10,7 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -28,8 +27,6 @@ import java.io.IOException;
 public class JwtFilter extends OncePerRequestFilter {
 
         private final JwtUtil jwtUtil;
-        private final CustomUserDetailsService userDetailsService;
-
         private static final Logger log = LoggerFactory.getLogger(JwtFilter.class);
 
         @Override
@@ -83,35 +80,34 @@ public class JwtFilter extends OncePerRequestFilter {
                 try {
                         final String token = authHeader.substring(7);
 
-                        String tokenType = jwtUtil.extractTokenType(token);
-                        if (tokenType == null || !tokenType.equals("ACCESS")) {
+                        // Parse and verify the signed JWT once. The previous flow also queried
+                        // the remote users table for every protected API request.
+                        var claims = jwtUtil.extractClaims(token);
+                        String tokenType = claims.get("type", String.class);
+                        if (!"ACCESS".equals(tokenType)) {
                                 log.warn("Invalid token type: {} for path: {}", tokenType, request.getRequestURI());
                                 sendUnauthorized(response, "Invalid token type");
                                 return;
                         }
 
-                        String email = jwtUtil.extractEmail(token);
+                        String email = claims.getSubject();
+                        String role = claims.get("role", String.class);
+                        String userId = claims.get("userId", String.class);
 
-                        if (email != null) {
-
-                                UserDetails userDetails = userDetailsService.loadUserByUsername(email);
-
-                                if (jwtUtil.validateToken(token, userDetails.getUsername())) {
-
-                                        UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                                                        userDetails,
-                                                        null,
-                                                        userDetails.getAuthorities());
-
-                                        authToken.setDetails(
-                                                        new WebAuthenticationDetailsSource().buildDetails(request));
-
-                                        SecurityContextHolder.getContext().setAuthentication(authToken);
-
-                                        log.debug("JWT auth set for user: {}", email);
-                                }
+                        if (email == null || email.isBlank() || !isAllowedRole(role)) {
+                                sendUnauthorized(response, "Invalid access token claims");
+                                return;
                         }
 
+                        JwtUserPrincipal principal = new JwtUserPrincipal(userId, email, role);
+                        UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+                                        principal,
+                                        null,
+                                        principal.getAuthorities());
+
+                        authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                        SecurityContextHolder.getContext().setAuthentication(authToken);
+                        log.debug("JWT auth set for user: {}", email);
                 } catch (Exception e) {
                         log.warn("JWT validation failed for path: {} Ã¢â‚¬â€ {}",
                                         request.getRequestURI(), e.getMessage());
@@ -122,6 +118,9 @@ public class JwtFilter extends OncePerRequestFilter {
                 filterChain.doFilter(request, response);
         }
 
+        private boolean isAllowedRole(String role) {
+                return "ROLE_USER".equals(role) || "ROLE_ADMIN".equals(role);
+        }
         private void sendUnauthorized(HttpServletResponse response, String message)
                         throws IOException {
                 // Guard against writing to an already-committed response.

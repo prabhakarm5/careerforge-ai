@@ -1,5 +1,5 @@
 # =====================================================================
-# application-common.yml â€” Shared config, IDENTICAL across dev & prod
+# application-common.yml Ã¢â‚¬â€ Shared config, IDENTICAL across dev & prod
 # =====================================================================
 # Rule of thumb used to decide what lives here vs in dev/prod:
 #   - Business logic, third-party API config, token economics, rate
@@ -45,7 +45,7 @@ app:
     initial-tokens: 100           # New user signup default token balance
 
   # ---------------------------------------
-  # ADMIN USER â€” auto-created on first startup
+  # ADMIN USER Ã¢â‚¬â€ auto-created on first startup
   # ---------------------------------------
   default-admin:
     email: ${ADMIN_EMAIL}
@@ -163,6 +163,10 @@ app:
       capacity: 10
       refill-tokens: 10
       refill-minutes: 1
+    resume:
+      capacity: 8
+      refill-tokens: 8
+      refill-minutes: 1
     vision:
       capacity: 15
       refill-tokens: 15
@@ -174,6 +178,16 @@ app:
     website-generator:
       capacity: 5
       refill-tokens: 5
+      refill-minutes: 1
+
+    # --- Claims and external discovery ---
+    promo-claim:
+      capacity: 5
+      refill-tokens: 5
+      refill-minutes: 1
+    job-search:
+      capacity: 12
+      refill-tokens: 12
       refill-minutes: 1
 
     # --- Payments ---
@@ -209,22 +223,22 @@ app:
       refill-minutes: 1
 
   # ---------------------------------------
-  # COOKIE SETTINGS â€” sab auth cookies (access, refresh, fingerprint)
+  # COOKIE SETTINGS Ã¢â‚¬â€ sab auth cookies (access, refresh, fingerprint)
   # yahi se control hoga, controller/util mein kahin bhi hardcode nahi
   #
-  # âœ… FIX â€” pehle ye block "app:" ke bahar, top-level "cookie:" ban gaya
-  # tha (galat indentation ki wajah se) â€” isliye Spring ko property
+  # Ã¢Å“â€¦ FIX Ã¢â‚¬â€ pehle ye block "app:" ke bahar, top-level "cookie:" ban gaya
+  # tha (galat indentation ki wajah se) Ã¢â‚¬â€ isliye Spring ko property
   # "app.cookie.refresh-token-name" milti hi nahi thi, sirf
   # "cookie.refresh-token-name" milti thi -> app start hi nahi ho raha
   # tha (UnsatisfiedDependencyException on CookieUtil bean). Ab "app:"
   # ke andar, sahi 2-space indent ke saath.
   #
-  # âœ… FIX â€” path "/api/auth" se "/" kar diya. Access-token cookie sirf
+  # Ã¢Å“â€¦ FIX Ã¢â‚¬â€ path "/api/auth" se "/" kar diya. Access-token cookie sirf
   # login/refresh response mein set hoti hai, lekin usko READ har ek
   # protected request pe (JwtAuthenticationFilter jaisa filter, jo
   # /api/chat, /api/wallet, /api/users, etc. sab pe chalta hai) karna
   # padta hai. Cookie ka "path" attribute browser ko batata hai ki
-  # cookie kis URL-prefix ke requests ke saath bhejni hai â€” agar
+  # cookie kis URL-prefix ke requests ke saath bhejni hai Ã¢â‚¬â€ agar
   # "/api/auth" rakhte to browser sirf /api/auth/** calls ke saath
   # cookie bhejta, baaki sab jagah (chat, wallet, user profile) cookie
   # missing milti aur wo saare authenticated calls 401 dete.
@@ -270,7 +284,7 @@ spring:
           github:
             user-name-attribute: id
 # =========================================
-# CLOUDINARY â€” Media Storage
+# CLOUDINARY Ã¢â‚¬â€ Media Storage
 # =========================================
 cloudinary:
   cloud-name: ${CLOUDINARY_CLOUD_NAME}
@@ -278,7 +292,7 @@ cloudinary:
   api-secret: ${CLOUDINARY_API_SECRET}
 
 # =========================================
-# GROQ AI â€” LLM Inference (Multi-Model)
+# GROQ AI Ã¢â‚¬â€ LLM Inference (Multi-Model)
 # =========================================
 # Frontend model dropdown is populated from this list (/api/chat/models).
 # Only models with vision: true should allow image attachments.
@@ -320,7 +334,7 @@ groq:
       vision: false
 
 # =========================================
-# OPENROUTER â€” Chat and Image Models
+# OPENROUTER Ã¢â‚¬â€ Chat and Image Models
 # =========================================
 openrouter:
   api-key: ${OPENROUTER_API_KEY}
@@ -381,7 +395,71 @@ openrouter:
   title: TrackAI
 
 # =========================================
-# RAZORPAY â€” Payment Gateway
+# GEMINI RESUME AI
+# Add GEMINI_API_KEY only in environment/secrets; never commit the key.
+# =========================================
+gemini:
+  resume:
+    api-key: ${GEMINI_API_KEY:CHANGE_ME_GEMINI_API_KEY}
+    base-url: https://generativelanguage.googleapis.com
+    # Every selectable model is configured here; Java contains no Gemini model IDs.
+    # Override any ID from backend environment without rebuilding the application.
+    model: ${GEMINI_RESUME_MODEL:gemini-2.5-flash}
+    models:
+      - id: ${GEMINI_RESUME_MODEL_FRONTIER:gemini-3.5-flash}
+        label: "Gemini 3.5 Flash"
+        description: "Frontier quality for detailed resume reasoning and rewriting"
+        tier: FRONTIER
+        preview: false
+      - id: ${GEMINI_RESUME_MODEL_PRO_PREVIEW:gemini-3.1-pro-preview}
+        label: "Gemini 3.1 Pro"
+        description: "Deep analysis for complex senior and specialist resumes"
+        tier: PRO
+        preview: true
+      - id: ${GEMINI_RESUME_MODEL_FAST_LITE:gemini-3.1-flash-lite}
+        label: "Gemini 3.1 Flash-Lite"
+        description: "Fast and economical analysis for quick resume checks"
+        tier: FAST
+        preview: false
+      - id: ${GEMINI_RESUME_MODEL_BALANCED:gemini-2.5-flash}
+        label: "Gemini 2.5 Flash"
+        description: "Reliable balance of speed, quality and cost"
+        tier: BALANCED
+        preview: false
+      - id: ${GEMINI_RESUME_MODEL_BUDGET:gemini-2.5-flash-lite}
+        label: "Gemini 2.5 Flash-Lite"
+        description: "Lowest-cost option for straightforward resumes"
+        tier: ECONOMY
+        preview: false
+      - id: ${GEMINI_RESUME_MODEL_DEEP:gemini-2.5-pro}
+        label: "Gemini 2.5 Pro"
+        description: "Deep reasoning for nuanced career histories"
+        tier: PRO
+        preview: false
+    timeout-seconds: 75
+    max-file-bytes: 5242880
+    max-resume-chars: 50000
+    max-job-description-chars: 20000
+    chat-history-messages: ${GEMINI_RESUME_CHAT_HISTORY_MESSAGES:100}
+    chat-history-max-chars: ${GEMINI_RESUME_CHAT_HISTORY_MAX_CHARS:24000}
+    chat-max-output-tokens: ${GEMINI_RESUME_CHAT_MAX_OUTPUT_TOKENS:8192}
+    json-max-output-tokens: ${GEMINI_RESUME_JSON_MAX_OUTPUT_TOKENS:8192}
+
+# =========================================
+# LIVE JOB DISCOVERY (Adzuna)
+# Create credentials at https://developer.adzuna.com and keep them in environment secrets.
+# =========================================
+jobs:
+  provider:
+    base-url: ${ADZUNA_BASE_URL:https://api.adzuna.com}
+    app-id: ${ADZUNA_APP_ID:}
+    app-key: ${ADZUNA_APP_KEY:}
+    default-country: ${ADZUNA_DEFAULT_COUNTRY:in}
+    results-per-page: ${ADZUNA_RESULTS_PER_PAGE:20}
+    max-age-days: ${ADZUNA_MAX_AGE_DAYS:30}
+    timeout-seconds: ${ADZUNA_TIMEOUT_SECONDS:20}
+# =========================================
+# RAZORPAY Ã¢â‚¬â€ Payment Gateway
 # =========================================
 razorpay:
   key-id: ${RAZORPAY_KEY_ID}
@@ -392,10 +470,19 @@ razorpay:
 # TOKEN COSTS PER FEATURE (TrackAI Wallet)
 # =========================================
 trackai:
+  monitoring:
+    max-events: ${MONITORING_MAX_EVENTS:1000}
+    retention-hours: ${MONITORING_RETENTION_HOURS:24}
+    # Enable only behind a trusted load balancer such as Elastic Beanstalk.
+    trust-proxy-headers: ${MONITORING_TRUST_PROXY_HEADERS:true}
   tokens:
     chat: 10
     image: 200
-    resume: 100
+    resume: ${TOKEN_COST_RESUME_LEGACY:100}
+    resume-analysis: ${TOKEN_COST_RESUME_ANALYSIS:30}
+    resume-chat: ${TOKEN_COST_RESUME_CHAT:5}
+    resume-match: ${TOKEN_COST_RESUME_MATCH:20}
+    resume-generate: ${TOKEN_COST_RESUME_GENERATE:40}
     website: 500
     pdf: 50
     audio: 80

@@ -2,6 +2,7 @@ package com.trackai.backend.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.trackai.backend.config.GroqModelConfig;
+import com.trackai.backend.security.JwtUserPrincipal;
 import com.trackai.backend.config.RateLimitProperties;
 import com.trackai.backend.dto.RateLimitResponse;
 import com.trackai.backend.dto.cache.CachedConversation;
@@ -19,6 +20,7 @@ import com.trackai.backend.exception.RateLImitException;
 import com.trackai.backend.repository.ChatMessageRepository;
 import com.trackai.backend.repository.ConversationRepository;
 import com.trackai.backend.repository.UserRepository;
+import com.trackai.backend.service.ChatResponsePolicy;
 import com.trackai.backend.service.ChatService;
 import com.trackai.backend.service.GroqService;
 import com.trackai.backend.service.OpenRouterChatService;
@@ -81,7 +83,7 @@ public class ChatServiceImpl implements ChatService {
         private static final Duration STREAM_TIMEOUT = Duration.ofMinutes(10);
         private static final long SSE_TIMEOUT_MS = STREAM_TIMEOUT.toMillis();
 
-        private static final int MAX_MEMORY_MESSAGES = 60;
+        private static final int MAX_MEMORY_MESSAGES = 100;
 
         private static final String EVENT_PING = "ping";
 
@@ -215,18 +217,6 @@ public class ChatServiceImpl implements ChatService {
                         return false;
                 }
         }
-
-        // NEW Ã¢â‚¬â€ dedicated helper to push a "thought" step to the client.
-        // This is what powers the Claude-style "thinking trail" in the UI:
-        // every real step the backend takes (reading context, searching
-        // memory, picking a model, generating) gets narrated as it happens,
-        // instead of the UI only ever showing a generic "Thinking..." spinner.
-        private void sendThought(SseEmitter emitter, String label) {
-                Map<String, String> payload = new HashMap<>();
-                payload.put("label", label);
-                safeSend(emitter, "thought", payload);
-        }
-
         private void completeEmitter(SseEmitter emitter, String conversationId) {
                 try {
                         Disposable heartbeat = heartbeatTasks.remove(conversationId);
@@ -251,6 +241,16 @@ public class ChatServiceImpl implements ChatService {
 
                 Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
                 String email = authentication.getName();
+
+                // Fast path for current access tokens: identity is already signed into JWT.
+                if (authentication.getPrincipal() instanceof JwtUserPrincipal principal
+                                && principal.userId() != null && !principal.userId().isBlank()) {
+                        return User.builder()
+                                        .id(principal.userId())
+                                        .email(principal.email())
+                                        .role(com.trackai.backend.enums.Role.valueOf(principal.role()))
+                                        .build();
+                }
 
                 CachedUser cachedUser = redisUserCacheService.getUser(email);
 
@@ -317,11 +317,14 @@ public class ChatServiceImpl implements ChatService {
                 redisConversationCacheService.saveConversation(cached);
         }
 
-        private Conversation getConversationById(String conversationId) {
+        private Conversation getConversationById(String conversationId, String userId) {
 
                 CachedConversation cached = redisConversationCacheService.getConversation(conversationId);
 
                 if (cached != null) {
+                        if (!userId.equals(cached.getUserId())) {
+                                throw new RuntimeException("Conversation not found");
+                        }
 
                         return Conversation.builder()
                                         .id(cached.getId())
@@ -337,7 +340,7 @@ public class ChatServiceImpl implements ChatService {
                                         .build();
                 }
 
-                Conversation conversation = conversationRepository.findById(conversationId)
+                Conversation conversation = conversationRepository.findByIdAndUserId(conversationId, userId)
                                 .orElseThrow(() -> new RuntimeException("Conversation not found"));
 
                 syncConversationCache(conversation);
@@ -489,13 +492,21 @@ public class ChatServiceImpl implements ChatService {
         }
 
 
-        private void applyResponseStyle(List<GroqMessage> memory, String responseStyle) {
+        private void applyResponseStyle(
+                        List<GroqMessage> memory,
+                        String responseStyle,
+                        String latestUserMessage) {
                 String style = responseStyle == null ? "concise" : responseStyle.trim().toLowerCase();
-                String instruction = "balanced".equals(style)
-                                ? "Answer clearly with useful detail, but avoid repetition and unnecessary sections."
-                                : "Keep the answer concise and direct. Prefer 2-6 short bullets or a brief paragraph. "
-                                                + "Stay under roughly 250 words unless the user explicitly asks for detailed code, "
-                                                + "a long document, or a comprehensive explanation.";
+                String instruction = "The latest user message is the active request and overrides older tasks. "
+                                + "Do not repeat or continue an earlier answer unless the latest message asks for it. "
+                                + ("balanced".equals(style)
+                                                ? "Answer clearly with useful detail, without repetition."
+                                                : "Be concise by default: use 1-4 short sentences and stay under 120 words "
+                                                                + "unless the latest message explicitly requests substantial code or a detailed document.")
+                                + " Follow any exact language, format, or length constraint in the latest message.";
+                if (ChatResponsePolicy.forcedReply(latestUserMessage).isPresent()) {
+                        instruction += " Return only the exact requested acknowledgement word with no markdown or explanation.";
+                }
                 memory.add(0, GroqMessage.builder().role("system").content(instruction).build());
         }
         private int estimateTokens(String text) {
@@ -554,14 +565,18 @@ public class ChatServiceImpl implements ChatService {
                 if (isNewConversation) {
                         conversation = createConversation(user, request.getMessage());
                 } else {
-                        conversation = getConversationById(request.getConversationId());
+                        conversation = getConversationById(request.getConversationId(), user.getId());
                 }
 
                 saveUserMessage(conversation.getId(), request.getMessage());
 
+                String forcedReply = ChatResponsePolicy.forcedReply(request.getMessage()).orElse(null);
+                if (forcedReply != null) {
+                        return completeLocalReply(user, conversation, request.getMessage(), forcedReply, isNewConversation);
+                }
                 List<GroqMessage> messages = buildConversationMemory(conversation.getId());
                 augmentWithRecalledContext(messages, conversation.getId(), request.getMessage());
-                applyResponseStyle(messages, request.getResponseStyle());
+                applyResponseStyle(messages, request.getResponseStyle(), request.getMessage());
                 boolean useOpenRouter = isOpenRouterModel(request.getModel());
                 String modelId = useOpenRouter
                                 ? resolveOpenRouterModelId(request.getModel())
@@ -647,7 +662,7 @@ public class ChatServiceImpl implements ChatService {
                         if (isNewConversation) {
                                 conversation = createConversation(user, request.getMessage());
                         } else {
-                                conversation = getConversationById(request.getConversationId());
+                                conversation = getConversationById(request.getConversationId(), user.getId());
                         }
                         saveUserMessage(conversation.getId(), request.getMessage());
                 } catch (Exception e) {
@@ -655,15 +670,27 @@ public class ChatServiceImpl implements ChatService {
                         return emitter;
                 }
 
-                List<GroqMessage> memory = buildConversationMemory(conversation.getId());
-                boolean recalledContext = augmentWithRecalledContext(memory, conversation.getId(),
-                                request.getMessage());
-                applyResponseStyle(memory, request.getResponseStyle());
-                boolean useOpenRouter = isOpenRouterModel(request.getModel());
-                String requestedModelId = useOpenRouter
-                                ? resolveOpenRouterModelId(request.getModel())
-                                : resolveModelId(request.getModel());
-                String imageBase64 = request.getImage();
+                final String forcedReply = ChatResponsePolicy.forcedReply(request.getMessage()).orElse(null);
+                final List<GroqMessage> memory;
+                final boolean useOpenRouter;
+                final String requestedModelId;
+                final String imageBase64;
+
+                if (forcedReply == null) {
+                        memory = buildConversationMemory(conversation.getId());
+                        augmentWithRecalledContext(memory, conversation.getId(), request.getMessage());
+                        applyResponseStyle(memory, request.getResponseStyle(), request.getMessage());
+                        useOpenRouter = isOpenRouterModel(request.getModel());
+                        requestedModelId = useOpenRouter
+                                        ? resolveOpenRouterModelId(request.getModel())
+                                        : resolveModelId(request.getModel());
+                        imageBase64 = request.getImage();
+                } else {
+                        memory = List.of();
+                        useOpenRouter = false;
+                        requestedModelId = "instruction";
+                        imageBase64 = null;
+                }
 
                 try {
                         Map<String, Object> meta = new HashMap<>();
@@ -671,18 +698,6 @@ public class ChatServiceImpl implements ChatService {
                         meta.put("title", conversation.getTitle());
                         meta.put("isNew", isNewConversation);
                         emitter.send(SseEmitter.event().name("meta").data(objectMapper.writeValueAsString(meta)));
-
-                        // User-facing progress describes real work, never internal routing details.
-                        sendThought(emitter, "Understanding your request");
-                        sendThought(emitter, "Reviewing the current conversation");
-                        if (imageBase64 != null && !imageBase64.isBlank()) {
-                                sendThought(emitter, "Analyzing the attached image");
-                        }
-                        if (recalledContext) {
-                                sendThought(emitter, "Checking relevant details from earlier messages");
-                        }
-                        sendThought(emitter, "Planning a clear response");
-                        sendThought(emitter, "Writing the answer");
                 } catch (Exception e) {
                         log.warn("Failed to send meta event", e);
                 }
@@ -692,6 +707,11 @@ public class ChatServiceImpl implements ChatService {
 
                 if (isNewConversation) {
                         generateTitleAsync(conversation, request.getMessage(), emitter);
+                }
+
+                if (forcedReply != null) {
+                        streamExecutor.execute(() -> streamLocalReply(emitter, user, conversation, forcedReply));
+                        return emitter;
                 }
 
                 streamExecutor.execute(() -> {
@@ -869,9 +889,7 @@ public class ChatServiceImpl implements ChatService {
                 }
         }
 
-        // CHANGED: message text translated to English; also emits a
-        // "thought" step so the switch shows up in the thinking trail too,
-        // not just as a one-off toast.
+        // Keep model fallback details user-friendly and provider-neutral.
         private void notifyModelSwitch(SseEmitter emitter, String fromModel, String toModel) {
                 try {
                         Map<String, Object> switched = new HashMap<>();
@@ -881,7 +899,6 @@ public class ChatServiceImpl implements ChatService {
                         emitter.send(SseEmitter.event()
                                         .name("model_switched")
                                         .data(objectMapper.writeValueAsString(switched)));
-                        sendThought(emitter, "Continuing after a temporary service delay");
                 } catch (Exception ignored) {
                 }
         }
@@ -904,6 +921,71 @@ public class ChatServiceImpl implements ChatService {
                 return continuationMemory;
         }
 
+        private ChatResponse completeLocalReply(
+                        User user,
+                        Conversation conversation,
+                        String userMessage,
+                        String reply,
+                        boolean isNewConversation) {
+                ChatResponse response = ChatResponse.builder()
+                                .response(reply)
+                                .provider("LOCAL")
+                                .model("instruction")
+                                .downloadable(false)
+                                .contentType("text/markdown")
+                                .promptTokens(0)
+                                .completionTokens(0)
+                                .totalTokens(0)
+                                .build();
+
+                saveAssistantMessage(conversation.getId(), response);
+                conversation.setUpdatedAt(LocalDateTime.now());
+                conversationRepository.save(conversation);
+                syncConversationCache(conversation);
+
+                if (isNewConversation) {
+                        generateTitleAsyncNonStreaming(conversation, userMessage);
+                }
+
+                response.setRemainingTokens(walletService.getWalletByUserId(user.getId()).getRemainingTokens());
+                response.setConversationId(conversation.getId());
+                response.setTitle(conversation.getTitle());
+                return response;
+        }
+
+        private void streamLocalReply(
+                        SseEmitter emitter,
+                        User user,
+                        Conversation conversation,
+                        String reply) {
+                Map<String, String> chunk = new HashMap<>();
+                chunk.put("content", reply);
+                if (!safeSend(emitter, "chunk", chunk)) {
+                        completeEmitter(emitter, conversation.getId());
+                        return;
+                }
+
+                ChatResponse response = ChatResponse.builder()
+                                .response(reply)
+                                .provider("LOCAL")
+                                .model("instruction")
+                                .downloadable(false)
+                                .contentType("text/markdown")
+                                .promptTokens(0)
+                                .completionTokens(0)
+                                .totalTokens(0)
+                                .build();
+                saveAssistantMessageSafely(conversation.getId(), response);
+                bumpConversationUpdatedAtSafely(conversation);
+
+                Map<String, Object> done = new HashMap<>();
+                done.put("conversationId", conversation.getId());
+                done.put("title", conversation.getTitle());
+                done.put("remainingTokens", walletService.getWalletByUserId(user.getId()).getRemainingTokens());
+                done.put("totalTokens", 0);
+                safeSend(emitter, "done", done);
+                completeEmitter(emitter, conversation.getId());
+        }
         private void finalizeStreamSafely(SseEmitter emitter, User user, Conversation conversation,
                         String fullText, String provider, String model) {
                 try {

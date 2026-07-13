@@ -1,6 +1,7 @@
 package com.trackai.backend.service.impl;
 
 import com.trackai.backend.dto.cache.CachedConversation;
+import com.trackai.backend.security.JwtUserPrincipal;
 import com.trackai.backend.dto.chat.*;
 import com.trackai.backend.dto.cache.CachedUser;
 import com.trackai.backend.entity.Conversation;
@@ -70,6 +71,15 @@ public class ConversationServiceImpl
                 }
 
                 String email = authentication.getName();
+                if (authentication.getPrincipal() instanceof JwtUserPrincipal principal
+                                && principal.userId() != null && !principal.userId().isBlank()) {
+                        return User.builder()
+                                        .id(principal.userId())
+                                        .email(principal.email())
+                                        .role(com.trackai.backend.enums.Role.valueOf(principal.role()))
+                                        .build();
+                }
+
                 if (email == null || email.isBlank() || "anonymousUser".equals(email)) {
                         throw new RuntimeException("Please login again to load conversations");
                 }
@@ -175,7 +185,8 @@ public class ConversationServiceImpl
         // ke liye use hota hai, neeche dekho.
         private Conversation fetchConversationForMutation(String conversationId) {
 
-                return conversationRepository.findById(conversationId)
+                User user = getAuthenticatedUser();
+                return conversationRepository.findByIdAndUserId(conversationId, user.getId())
                                 .orElseThrow(() -> new RuntimeException(
                                                 conversationNOtFound));
         }
@@ -247,6 +258,8 @@ public class ConversationServiceImpl
         public ConversationDetailsResponse getConversation(
                         String conversationId) {
 
+                User user = getAuthenticatedUser();
+
                 // FIX (naya): CACHE-FIRST â€” title/id ke liye pehle Redis
                 // check, DB findById() sirf cache-MISS pe. Messages
                 // hamesha DB se hi aayenge (poori history dikhani hai
@@ -260,6 +273,9 @@ public class ConversationServiceImpl
                 String titleResolved;
 
                 if (cachedConversation != null) {
+                        if (!user.getId().equals(cachedConversation.getUserId())) {
+                                throw new RuntimeException(conversationNOtFound);
+                        }
 
                         conversationIdResolved = cachedConversation.getId();
                         titleResolved = cachedConversation.getTitle();
@@ -270,7 +286,7 @@ public class ConversationServiceImpl
 
                                         conversationRepository
 
-                                                        .findById(conversationId)
+                                                        .findByIdAndUserId(conversationId, user.getId())
 
                                                         .orElseThrow(() -> new RuntimeException(
                                                                         conversationNOtFound));
@@ -366,6 +382,8 @@ public class ConversationServiceImpl
         @Override
         public void deleteConversation(
                         String conversationId) {
+
+                fetchConversationForMutation(conversationId);
 
                 chatMessageRepository.deleteAll(
 

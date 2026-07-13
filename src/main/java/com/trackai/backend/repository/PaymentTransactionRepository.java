@@ -1,6 +1,7 @@
 package com.trackai.backend.repository;
 
 import com.trackai.backend.entity.PaymentTransaction;
+import com.trackai.backend.enums.PaymentStatus;
 
 import jakarta.persistence.LockModeType;
 
@@ -37,4 +38,6 @@ public interface PaymentTransactionRepository
 
         // User Payment History
         List<PaymentTransaction> findByUserIdOrderByCreatedAtDesc(String userId);
+
+        boolean existsByUserIdAndStatus(String userId, PaymentStatus status);
 }

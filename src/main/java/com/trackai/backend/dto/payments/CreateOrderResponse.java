@@ -8,12 +8,11 @@ import lombok.Setter;
 @Setter
 @Builder
 public class CreateOrderResponse {
-
     private String orderId;
-
     private Long amount;
-
+    private Long originalAmount;
+    private Long discountAmount;
+    private String appliedPromoCode;
     private String currency;
-
     private String keyId;
 }

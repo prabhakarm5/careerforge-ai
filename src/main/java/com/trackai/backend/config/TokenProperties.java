@@ -16,7 +16,16 @@ public class TokenProperties {
 
     private Long image;
 
+    // Legacy fallback for deployments that have not split Resume AI billing yet.
     private Long resume;
+
+    private Long resumeAnalysis;
+
+    private Long resumeChat;
+
+    private Long resumeMatch;
+
+    private Long resumeGenerate;
 
     private Long website;
 

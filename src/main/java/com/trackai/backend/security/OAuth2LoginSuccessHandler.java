@@ -178,7 +178,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
         private void issueCookieSession(HttpServletRequest request, HttpServletResponse response, User user) {
                 String fingerprint = buildRequestFingerprint(request);
-                String refreshToken = jwtUtil.generateRefreshToken(user.getEmail(), fingerprint);
+                String refreshToken = jwtUtil.generateRefreshToken(user.getEmail(), user.getId(), fingerprint);
 
                 redisRefreshTokenService.saveRefreshToken(user.getEmail(), fingerprint, refreshToken);
 

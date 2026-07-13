@@ -5,15 +5,19 @@ import com.trackai.backend.dto.UpdateProfileRequest;
 import com.trackai.backend.dto.UpdateProfileResponse;
 import com.trackai.backend.dto.cache.CachedUser;
 import com.trackai.backend.dto.cloudinary.CloudinaryUploadResponse;
+import com.trackai.backend.dto.admin.AdminMessageRequest;
 import com.trackai.backend.entity.User;
 import com.trackai.backend.enums.Role;
 import com.trackai.backend.repository.UserRepository;
 import com.trackai.backend.service.AdminService;
 import com.trackai.backend.service.CloudinaryService;
+import com.trackai.backend.service.MailService;
 import com.trackai.backend.service.RedisUserCacheService;
 
 import lombok.RequiredArgsConstructor;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -30,6 +34,8 @@ public class AdminServiceImpl
 
         private final CloudinaryService cloudinaryService;
 
+        private final MailService mailService;
+
         // FIX: RedisUserCacheService inject kiya taaki admin ke har
         // action (enable/disable/block/unblock/delete) ke baad user ka
         // stale Redis cache turant clear ho jaaye. Warna blocked/disabled
@@ -44,6 +50,15 @@ public class AdminServiceImpl
                 return userRepository.findAll();
         }
 
+        @Override
+        public Page<User> getUsers(String search, Pageable pageable) {
+                if (search == null || search.isBlank()) {
+                        return userRepository.findAll(pageable);
+                }
+                String query = search.trim();
+                return userRepository.findByEmailContainingIgnoreCaseOrNameContainingIgnoreCase(
+                                query, query, pageable);
+        }
         // GET USER BY ID
         @Override
         public User getUserById(
@@ -387,6 +402,18 @@ public class AdminServiceImpl
                                 .build();
         }
 
+        @Override
+        public ActionResponse sendMessage(String id, AdminMessageRequest request) {
+                User user = getUserById(id);
+                mailService.sendAdminMessage(user.getName(), user.getEmail(), request.subject(), request.message());
+                return ActionResponse.builder()
+                                .message("Message queued for delivery")
+                                .action("MESSAGE_USER")
+                                .userId(user.getId())
+                                .userEmail(user.getEmail())
+                                .status(true)
+                                .build();
+        }
         // GET CURRENT ADMIN
         @Override
         public User getCurrentAdmin() {

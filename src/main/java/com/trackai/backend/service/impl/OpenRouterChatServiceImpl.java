@@ -9,6 +9,7 @@ import com.trackai.backend.dto.groq.GroqMessage;
 import com.trackai.backend.dto.groq.GroqResponse;
 import com.trackai.backend.dto.groq.GroqStreamChunk;
 import com.trackai.backend.exception.OpenRouterException;
+import com.trackai.backend.service.ChatResponsePolicy;
 import com.trackai.backend.service.OpenRouterChatService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,12 +42,17 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
 
     private static final String SYSTEM_PROMPT = """
             You are CareerForge AI, a knowledgeable and helpful assistant.
-            Auto-detect the user's language. If the user writes Hindi/Hinglish, answer in Hindi/Hinglish. If the user writes English, answer in English.
-            Prefer detailed, complete answers with rich Markdown formatting: short headings, bullets, numbered steps, tables, and code blocks when useful.
-            When helpful, briefly show visible progress sections such as "What I checked", "What I found", and "Next steps".
-            If the user asks for an app, page, or downloadable code, provide clean Markdown with separate fenced code blocks and short filenames. Do not output giant data: URLs, raw HTML anchor download links, or mojibake text.
-            Do not claim web search unless a web search tool was actually used.
-            Never say you are a specific underlying model. You are CareerForge AI.
+            Treat the latest user message as the active instruction. Its requested language, format, and length
+            override earlier tasks in the conversation. Never continue or regenerate an earlier artifact unless
+            the latest message explicitly asks you to.
+            Match the latest user's language. Keep replies concise by default: usually 1-4 sentences and under
+            120 words. Use headings, lists, tables, or code blocks only when they genuinely improve the requested
+            answer. When a short follow-up is ambiguous, ask one short context-aware question instead of inventing
+            a new task or dumping code. If the user requests an exact reply such as "only say yes", output exactly
+            that reply and nothing else.
+            For explicit code or document requests, provide a complete result without giant data URLs, raw download
+            anchors, mojibake text, or claims of web search that did not happen.
+            Never identify yourself as an underlying model. You are CareerForge AI.
             """;
 
     private static final int MAX_RETRIES = 2;
@@ -55,8 +61,8 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
     // Dynamic max_tokens sizing: chhota input -> chhota request, bada input ->
     // zyada room, hamesha ABSOLUTE_MAX_TOKENS aur model ke context window ke
     // andar.
-    private static final int ABSOLUTE_MAX_TOKENS = 81920;
-    private static final int MIN_TOKENS = 40000;
+    private static final int ABSOLUTE_MAX_TOKENS = 8192;
+    private static final int MIN_TOKENS = 16;
 
     // Conservative default jab model ka apna context-window config me na mile.
     private static final int DEFAULT_ASSUMED_CONTEXT_WINDOW = 16000;
@@ -249,7 +255,7 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
         }
 
         int estimatedInputTokens = estimateConversationTokens(messages);
-        int roomNeeded = estimatedInputTokens + MIN_TOKENS;
+        int roomNeeded = estimatedInputTokens + 256;
 
         OpenRouterProperties.ModelInfo bestFit = null;
         OpenRouterProperties.ModelInfo largestOverall = null;
@@ -287,29 +293,17 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
 
     private int computeDynamicMaxTokens(List<GroqMessage> messages, String modelId) {
         int estimatedInputTokens = estimateConversationTokens(messages);
-
         int contextWindow = resolveContextWindow(modelId);
-
         int safetyBuffer = Math.max(64, (int) (contextWindow * 0.05));
-        int roomForOutput = contextWindow - estimatedInputTokens - safetyBuffer;
+        int roomForOutput = Math.max(MIN_TOKENS, contextWindow - estimatedInputTokens - safetyBuffer);
+        int requested = ChatResponsePolicy.recommendedMaxOutputTokens(messages, ABSOLUTE_MAX_TOKENS);
+        int candidate = Math.max(MIN_TOKENS, Math.min(requested, roomForOutput));
 
-        int proportionalCeiling = Math.max(MIN_TOKENS, estimatedInputTokens * 2);
-
-        int candidate = Math.min(roomForOutput, proportionalCeiling);
-        candidate = Math.min(candidate, ABSOLUTE_MAX_TOKENS);
-        candidate = Math.max(candidate, MIN_TOKENS);
-
-        if (candidate < MIN_TOKENS) {
-            candidate = MIN_TOKENS;
-        }
-
-        log.debug("Dynamic max_tokens calc — model={}, contextWindow={}, estimatedInput={}, "
-                + "roomForOutput={}, proportionalCeiling={}, final={}",
-                modelId, contextWindow, estimatedInputTokens, roomForOutput, proportionalCeiling, candidate);
-
+        log.debug("Dynamic max_tokens calc - model={}, contextWindow={}, estimatedInput={}, "
+                + "roomForOutput={}, requested={}, final={}",
+                modelId, contextWindow, estimatedInputTokens, roomForOutput, requested, candidate);
         return candidate;
     }
-
     private int estimateConversationTokens(List<GroqMessage> messages) {
         int total = estimateTokens(SYSTEM_PROMPT);
         if (messages != null) {

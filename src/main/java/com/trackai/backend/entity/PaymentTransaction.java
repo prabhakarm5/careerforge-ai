@@ -8,14 +8,15 @@ import lombok.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "payment_transactions")
+@Table(name = "payment_transactions", indexes = {
+        @Index(name = "idx_payment_user_status", columnList = "user_id,status")
+})
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
 public class PaymentTransaction {
-
     @Id
     private String id;
 
@@ -28,18 +29,19 @@ public class PaymentTransaction {
     @Column(nullable = false, unique = true)
     private String orderId;
 
+    // Final verified amount charged by Razorpay.
     @Column(nullable = false)
     private Long amount;
+
+    private Long originalAmount;
+    private Long discountAmount;
+    private String promoCode;
+    private String promoClaimId;
+    private Long bonusTokens;
 
     @Column(nullable = false)
     private String currency;
 
-    /*
-     * ==========================================================
-     * PostgreSQL + MySQL (ACTIVE)
-     * ==========================================================
-     * EnumType.STRING is fully compatible with both databases.
-     */
     @Enumerated(EnumType.STRING)
     private PaymentStatus status;
 
@@ -49,19 +51,9 @@ public class PaymentTransaction {
     @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();
 
-    // add these fields to your existing PaymentTransaction entity
     @Column(unique = true)
-    private String paymentId; // unique constraint -> prevents same payment being processed twice
+    private String paymentId;
 
     private LocalDateTime updatedAt;
-
-    private String failureReason; // for failed payments
-
-    /*
-     * ==========================================================
-     * MySQL (NOTE)
-     * ==========================================================
-     * No database-specific changes required.
-     * This entity works with both PostgreSQL and MySQL.
-     */
+    private String failureReason;
 }

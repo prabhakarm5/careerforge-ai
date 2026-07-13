@@ -51,7 +51,9 @@ public class CorsConfig {
                                 "Content-Type",
                                 "Accept",
                                 "Origin",
-                                "X-Requested-With"));
+                                "X-Requested-With",
+                                "X-Client-Timezone",
+                                "X-Client-Locale"));
 
                 configuration.setExposedHeaders(List.of(
                                 "Authorization"));

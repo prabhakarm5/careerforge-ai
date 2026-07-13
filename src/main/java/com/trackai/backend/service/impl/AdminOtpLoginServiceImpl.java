@@ -168,14 +168,22 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 // Save resend cooldown
                 redisAdminOtpService.saveResendCooldown(email);
 
-                // Send email
-                mailService.sendAdminLoginOtp(
+                // ✅ FIX — pehle ye synchronous tha (mailService.sendAdminLoginOtp(...)
+                // seedha yahin call ho raha tha), jiski wajah se SMTP handshake/send
+                // poora hone tak HTTP response hi client ko nahi jaata tha —
+                // isi se 50-70 second ka delay aa raha tha OTP bhejte waqt.
+                //
+                // Ab email async thread pool (AsyncConfig ka default executor) mein
+                // background me bheji jaayegi. OTP already Redis me save ho chuka
+                // hai is point tak, isliye response turant client ko chala jaayega
+                // — email thodi der baad silently deliver hogi.
+                mailService.sendAdminLoginOtpAsync(
                                 user.getName(),
                                 user.getEmail(),
                                 otp,
                                 otpExpiryMinutes);
 
-                log.info("Admin login OTP sent for email: {}", email);
+                log.info("Admin login OTP queued for email: {}", email);
         }
 
         // Verify admin login OTP
@@ -242,10 +250,12 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 // Generate tokens
                 String accessToken = jwtUtil.generateAdminAccessToken(
                                 user.getEmail(),
+                                user.getId(),
                                 fingerprint);
 
                 String refreshToken = jwtUtil.generateAdminRefreshToken(
                                 user.getEmail(),
+                                user.getId(),
                                 fingerprint,
                                 absoluteExpiry);
 
@@ -328,13 +338,13 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 // Save resend cooldown
                 redisAdminOtpService.saveResendCooldown(email);
 
-                // Send email
-                mailService.sendAdminLoginOtp(
+                // ✅ FIX — same reason as sendAdminLoginOtp() — async email
+                mailService.sendAdminLoginOtpAsync(
                                 user.getName(),
                                 user.getEmail(),
                                 otp,
                                 otpExpiryMinutes);
 
-                log.info("Admin login OTP resent for email: {}", email);
+                log.info("Admin login OTP resend queued for email: {}", email);
         }
 }

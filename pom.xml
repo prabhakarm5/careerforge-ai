@@ -78,6 +78,12 @@
             <version>8.0.5</version>
         </dependency>
       
+        <!-- APACHE POI - secure DOCX resume text extraction -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.4.1</version>
+        </dependency>
 <!--postgre sql-->
         <dependency>
     <groupId>org.postgresql</groupId>

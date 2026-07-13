@@ -10,11 +10,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 public interface ConversationRepository
                 extends JpaRepository<Conversation, String> {
 
         boolean existsByIdAndUserId(String id, String userId);
+
+        Optional<Conversation> findByIdAndUserId(String id, String userId);
 
         List<Conversation>
 

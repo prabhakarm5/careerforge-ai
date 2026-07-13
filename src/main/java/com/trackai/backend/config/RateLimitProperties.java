@@ -63,6 +63,10 @@ public class RateLimitProperties {
     // Website Generator API
     private Limit websiteGenerator = new Limit();
 
+    // Promo claims and external job searches are security-sensitive.
+    private Limit promoClaim = new Limit();
+    private Limit jobSearch = new Limit();
+
     // Create Order API
     private Limit createOrder = new Limit();
 

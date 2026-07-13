@@ -59,11 +59,12 @@ public class JwtUtil {
         // TOKEN GENERATION
         // =========================================
 
-        public String generateAccessToken(String email, String fingerprint) {
+        public String generateAccessToken(String email, String userId, String fingerprint) {
                 return Jwts.builder()
                                 .setSubject(email)
                                 .claim("type", "ACCESS")
                                 .claim("role", "ROLE_USER")
+                                .claim("userId", userId)
                                 .claim("fingerprint", fingerprint)
                                 .setIssuedAt(new Date())
                                 .setExpiration(new Date(
@@ -73,11 +74,12 @@ public class JwtUtil {
                                 .compact();
         }
 
-        public String generateRefreshToken(String email, String fingerprint) {
+        public String generateRefreshToken(String email, String userId, String fingerprint) {
                 return Jwts.builder()
                                 .setSubject(email)
                                 .claim("type", "REFRESH")
                                 .claim("role", "ROLE_USER")
+                                .claim("userId", userId)
                                 .claim("fingerprint", fingerprint)
                                 .setIssuedAt(new Date())
                                 .setExpiration(new Date(
@@ -86,7 +88,7 @@ public class JwtUtil {
                                 .compact();
         }
 
-        public String generateAdminAccessToken(String email, String fingerprint) {
+        public String generateAdminAccessToken(String email, String userId, String fingerprint) {
                 long sessionExpiry = System.currentTimeMillis()
                                 + adminAbsoluteSessionExpiry.toMillis();
 
@@ -94,6 +96,7 @@ public class JwtUtil {
                                 .setSubject(email)
                                 .claim("type", "ACCESS")
                                 .claim("role", "ROLE_ADMIN")
+                                .claim("userId", userId)
                                 .claim("fingerprint", fingerprint)
                                 .claim("absoluteExpiry", sessionExpiry)
                                 .setIssuedAt(new Date())
@@ -104,11 +107,12 @@ public class JwtUtil {
         }
 
         public String generateAdminRefreshToken(
-                        String email, String fingerprint, long absoluteExpiry) {
+                        String email, String userId, String fingerprint, long absoluteExpiry) {
                 return Jwts.builder()
                                 .setSubject(email)
                                 .claim("type", "REFRESH")
                                 .claim("role", "ROLE_ADMIN")
+                                .claim("userId", userId)
                                 .claim("fingerprint", fingerprint)
                                 .claim("absoluteExpiry", absoluteExpiry)
                                 .setIssuedAt(new Date())
@@ -132,6 +136,10 @@ public class JwtUtil {
 
         public String extractRole(String token) {
                 return extractClaims(token).get("role", String.class);
+        }
+
+        public String extractUserId(String token) {
+                return extractClaims(token).get("userId", String.class);
         }
 
         public String extractFingerprint(String token) {
@@ -160,7 +168,7 @@ public class JwtUtil {
                 return extractClaims(token).getExpiration().before(new Date());
         }
 
-        private Claims extractClaims(String token) {
+        public Claims extractClaims(String token) {
                 return Jwts.parserBuilder()
                                 .setSigningKey(getSignKey())
                                 .build()

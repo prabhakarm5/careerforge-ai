@@ -3,43 +3,35 @@ package com.trackai.backend.service;
 import com.trackai.backend.dto.ActionResponse;
 import com.trackai.backend.dto.UpdateProfileRequest;
 import com.trackai.backend.dto.UpdateProfileResponse;
+import com.trackai.backend.dto.admin.AdminMessageRequest;
 import com.trackai.backend.entity.User;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.util.List;
 
 public interface AdminService {
 
-    // GET ALL USERS
+    // Kept for internal compatibility; API uses the paginated safe DTO endpoint.
     List<User> getAllUsers();
 
-    // GET USER BY ID
-    User getUserById(
-            String id);
+    Page<User> getUsers(String search, Pageable pageable);
 
-    // ENABLE USER
-    ActionResponse enableUser(
-            String id);
+    User getUserById(String id);
 
-    // DISABLE USER
-    ActionResponse disableUser(
-            String id);
+    ActionResponse enableUser(String id);
 
-    // BLOCK USER
-    ActionResponse blockUser(
-            String id);
+    ActionResponse disableUser(String id);
 
-    // UNBLOCK USER
-    ActionResponse unblockUser(
-            String id);
+    ActionResponse blockUser(String id);
 
-    // DELETE USER
-    ActionResponse deleteUser(
-            String id);
+    ActionResponse unblockUser(String id);
 
-    // GET CURRENT ADMIN
+    ActionResponse deleteUser(String id);
+
+    ActionResponse sendMessage(String id, AdminMessageRequest request);
+
     User getCurrentAdmin();
 
-    // UPDATE CURRENT ADMIN
-    UpdateProfileResponse updateCurrentAdmin(
-            UpdateProfileRequest request);
+    UpdateProfileResponse updateCurrentAdmin(UpdateProfileRequest request);
 }

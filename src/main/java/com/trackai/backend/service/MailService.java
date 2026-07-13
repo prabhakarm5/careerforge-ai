@@ -60,4 +60,11 @@ public interface MailService {
         @Async
         void sendPaymentFailedEmail(String userName, String toEmail, PaymentTransaction txn, String reason,
                         byte[] invoicePdf, int refundSlaDays);
+
+        @Async
+        void sendAdminMessage(String userName, String toEmail, String subject, String message);
+
+        @Async
+        public void sendAdminLoginOtpAsync(String name, String email, String otp, long expiryMinutes);
+
 }

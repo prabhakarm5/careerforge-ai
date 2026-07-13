@@ -20,6 +20,8 @@ import com.trackai.backend.repository.UserRepository;
 import com.trackai.backend.service.MailService;
 import com.trackai.backend.service.PaymentService;
 import com.trackai.backend.service.PdfInvoiceService;
+import com.trackai.backend.service.PromoCodeService;
+import com.trackai.backend.service.PromoCodeService.PromoApplication;
 import com.trackai.backend.service.RedisRateLimitService;
 import com.trackai.backend.service.WalletService;
 
@@ -52,6 +54,7 @@ public class PaymentServiceImpl implements PaymentService {
         private final RateLimitProperties rateLimitProperties;
         private final MailService mailService;
         private final PdfInvoiceService pdfInvoiceService;
+        private final PromoCodeService promoCodeService;
 
         @Value("${razorpay.key-id}")
         private String keyId;
@@ -75,67 +78,62 @@ public class PaymentServiceImpl implements PaymentService {
 
         // ───────────────────────── CREATE ORDER ─────────────────────────
         @Override
+        
         public CreateOrderResponse createOrder(CreateOrderRequest request) {
-
                 User user = getAuthenticatedUser();
-
-                // FIXED: rate limit key was a flat string ("create-order") shared by
-                // EVERY user — one user's requests could exhaust the bucket for
-                // everyone else. Keyed per-user now, like the rest of the app's
-                // rate limiters should be.
                 RateLimitResponse rateLimitResponse = redisRateLimitService.allowRequest(
                                 "create-order:" + user.getId(),
                                 rateLimitProperties.getCreateOrder().getCapacity(),
                                 rateLimitProperties.getCreateOrder().getRefillTokens(),
                                 rateLimitProperties.getCreateOrder().getRefillMinutes());
-
-                if (!rateLimitResponse.isAllowed()) {
-                        throw new RuntimeException(rateLimitResponse.getMessage());
-                }
+                if (!rateLimitResponse.isAllowed()) throw new RuntimeException(rateLimitResponse.getMessage());
 
                 SubscriptionPlan plan = subscriptionPlanRepository.findById(request.getPlanId())
                                 .orElseThrow(() -> new RuntimeException("Plan not found"));
+                if (Boolean.FALSE.equals(plan.getActive())) throw new RuntimeException("This plan is no longer available");
 
-                // Guard against buying a plan the admin has since disabled/retired.
-                if (Boolean.FALSE.equals(plan.getActive())) {
-                        throw new RuntimeException("This plan is no longer available");
+                String temporaryReference = "pending:" + UUID.randomUUID();
+                PromoApplication promo = promoCodeService.reserveForOrder(
+                                user.getId(), request.getPromoCode(), temporaryReference);
+                long originalAmount = plan.getPrice();
+                long discountAmount = Math.min(originalAmount,
+                                Math.round(originalAmount * (promo.discountPercent() / 100.0)));
+                long payableAmount = originalAmount - discountAmount;
+                if (payableAmount < 1) {
+                        promoCodeService.releaseReservation(promo.claimId(), temporaryReference);
+                        throw new RuntimeException("This checkout amount is invalid. Use a free-plan reward instead.");
                 }
 
                 try {
                         JSONObject options = new JSONObject();
-                        options.put("amount", plan.getPrice() * 100);
+                        options.put("amount", payableAmount * 100);
                         options.put("currency", "INR");
                         options.put("receipt", UUID.randomUUID().toString());
-
                         Order order = razorpayClient.orders.create(options);
                         String orderId = order.get("id").toString();
+                        promoCodeService.attachOrder(promo.claimId(), temporaryReference, orderId);
 
                         PaymentTransaction payment = PaymentTransaction.builder()
-                                        .id(UUID.randomUUID().toString())
-                                        .userId(user.getId())
-                                        .subscriptionPlanId(plan.getId())
-                                        .orderId(orderId)
-                                        .amount(plan.getPrice())
-                                        .currency("INR")
-                                        .status(PaymentStatus.PENDING)
-                                        .gateway(PaymentGateway.RAZORPAY)
-                                        .createdAt(LocalDateTime.now())
-                                        .build();
-
+                                        .id(UUID.randomUUID().toString()).userId(user.getId())
+                                        .subscriptionPlanId(plan.getId()).orderId(orderId)
+                                        .amount(payableAmount).originalAmount(originalAmount)
+                                        .discountAmount(discountAmount).promoCode(promo.code())
+                                        .promoClaimId(promo.claimId()).bonusTokens(promo.bonusTokens())
+                                        .currency("INR").status(PaymentStatus.PENDING)
+                                        .gateway(PaymentGateway.RAZORPAY).createdAt(LocalDateTime.now()).build();
                         paymentTransactionRepository.save(payment);
 
-                        return CreateOrderResponse.builder()
-                                        .orderId(orderId)
-                                        .amount(plan.getPrice())
-                                        .currency("INR")
-                                        .keyId(keyId)
-                                        .build();
-
-                } catch (Exception e) {
-                        throw new RuntimeException("Failed to create order : " + e.getMessage());
+                        return CreateOrderResponse.builder().orderId(orderId).amount(payableAmount)
+                                        .originalAmount(originalAmount).discountAmount(discountAmount)
+                                        .appliedPromoCode(promo.code()).currency("INR").keyId(keyId).build();
+                } catch (RuntimeException exception) {
+                        promoCodeService.releaseReservation(promo.claimId(), null);
+                        throw exception;
+                } catch (Exception exception) {
+                        promoCodeService.releaseReservation(promo.claimId(), null);
+                        throw new RuntimeException("Failed to create order: " + exception.getMessage());
                 }
         }
-
         // ───────────────────────── VERIFY PAYMENT (client redirect flow)
         // ─────────────────────────
         @Transactional

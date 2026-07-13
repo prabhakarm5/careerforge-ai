@@ -2,6 +2,7 @@ package com.trackai.backend.repository;
 
 import com.trackai.backend.entity.WalletTransaction;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
@@ -27,6 +28,6 @@ public interface WalletTransactionRepository
          */
 
         // Transaction History of a User
-        List<WalletTransaction> findByUserIdOrderByCreatedAtDesc(String userId);
+        List<WalletTransaction> findByUserIdOrderByCreatedAtDesc(String userId, Pageable pageable);
 
 }

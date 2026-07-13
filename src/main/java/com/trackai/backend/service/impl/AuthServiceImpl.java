@@ -266,10 +266,12 @@ public class AuthServiceImpl implements AuthService {
                 // Generate tokens
                 String accessToken = jwtUtil.generateAccessToken(
                                 user.getEmail(),
+                                user.getId(),
                                 fingerprint);
 
                 String refreshToken = jwtUtil.generateRefreshToken(
                                 user.getEmail(),
+                                user.getId(),
                                 fingerprint);
 
                 // Save refresh token
@@ -363,39 +365,38 @@ public class AuthServiceImpl implements AuthService {
                                         jwtUtil.extractEmail(
                                                         refreshToken));
 
-                        // Validate token in Redis
-                        boolean validToken = redisRefreshTokenService
-                                        .isValidRefreshToken(
-                                                        email,
-                                                        fingerprint,
-                                                        refreshToken);
-
-                        if (!validToken) {
-
-                                throw new RuntimeException(
-                                                "Refresh token expired or revoked");
+                        String userId = jwtUtil.extractUserId(refreshToken);
+                        if (userId == null || userId.isBlank()) {
+                                CachedUser cachedUser = redisUserCacheService.getUser(email);
+                                userId = cachedUser != null
+                                                ? cachedUser.getId()
+                                                : userRepository.findByEmail(email)
+                                                                .orElseThrow(() -> new RuntimeException("User not found"))
+                                                                .getId();
                         }
 
-                        // Delete old refresh token
-                        redisRefreshTokenService.deleteRefreshToken(
-                                        email,
-                                        fingerprint);
-
-                        // Generate new tokens
+                        // Generate the replacement first, then atomically compare-and-set it.
+                        // This removes separate Redis GET, DELETE and SET round trips.
                         String newAccessToken = jwtUtil.generateAccessToken(
                                         email,
+                                        userId,
                                         fingerprint);
 
                         String newRefreshToken = jwtUtil.generateRefreshToken(
                                         email,
+                                        userId,
                                         fingerprint);
 
-                        // Save new refresh token
-                        redisRefreshTokenService.saveRefreshToken(
+                        boolean rotated = redisRefreshTokenService.rotateRefreshToken(
                                         email,
                                         fingerprint,
+                                        refreshToken,
                                         newRefreshToken);
 
+                        if (!rotated) {
+                                throw new RuntimeException(
+                                                "Refresh token expired, revoked, or already rotated");
+                        }
                         // Response
                         return RefreshTokenResponse.builder()
                                         .accessToken(newAccessToken)

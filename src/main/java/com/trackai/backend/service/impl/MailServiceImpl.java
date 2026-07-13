@@ -263,6 +263,7 @@ public class MailServiceImpl implements MailService {
 
         // ── ADMIN LOGIN OTP ──────────────────────────────────────────────────
         @Override
+        @Async
         public void sendAdminLoginOtp(String userName, String toEmail, String otp, long expiryMinutes) {
 
                 String body = paragraph("Hello <b style=\"color:#e2e8f0;\">" + userName + "</b>,")
@@ -278,6 +279,17 @@ public class MailServiceImpl implements MailService {
                                 BRAND_GRADIENT);
 
                 send(toEmail, "TrackAI Admin Login OTP", html);
+        }
+
+        @Async // ✅ tumhare AsyncConfig ka default executor (mail-async-*) use hoga
+        @Override
+        public void sendAdminLoginOtpAsync(String name, String email, String otp, long expiryMinutes) {
+                try {
+                        sendAdminLoginOtp(name, email, otp, expiryMinutes); // existing synchronous method,
+                                                                            // jaise-tha-waisa
+                } catch (Exception e) {
+                        log.error("Failed to send admin OTP email to {}", email, e);
+                }
         }
 
         // ── PAYMENT SUCCESS ──────────────────────────────────────────────
@@ -357,4 +369,27 @@ public class MailServiceImpl implements MailService {
                 send(toEmail, "Payment Failed - TrackAI", html, invoicePdf,
                                 "payment-failed-" + txn.getOrderId() + ".pdf");
         }
+
+        @Override
+        @Async
+        public void sendAdminMessage(String userName, String toEmail, String subject, String message) {
+                String safeName = escapeHtml(userName == null ? "there" : userName);
+                String safeMessage = escapeHtml(message).replace("\n", "<br>");
+                String body = "<p style=\"margin:0 0 16px;color:" + TEXT_BODY + ";\">Hi " + safeName + ",</p>"
+                                + "<p style=\"margin:0;color:" + TEXT_BODY + ";line-height:1.7;\">" + safeMessage
+                                + "</p>";
+                send(toEmail, subject.trim(), wrapShell("i", escapeHtml(subject.trim()), body,
+                                "This message was sent by the CareerForge AI support team.", BRAND_GRADIENT));
+        }
+
+        private String escapeHtml(String value) {
+                if (value == null)
+                        return "";
+                return value.replace("&", "&amp;")
+                                .replace("<", "&lt;")
+                                .replace(">", "&gt;")
+                                .replace("\"", "&quot;")
+                                .replace("'", "&#39;");
+        }
+
 }
