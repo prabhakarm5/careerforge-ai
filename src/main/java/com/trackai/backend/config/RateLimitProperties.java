@@ -60,6 +60,12 @@ public class RateLimitProperties {
     // Resume API
     private Limit resume = new Limit();
 
+    // Cover letter generation API
+    private Limit coverLetter = new Limit();
+
+    // Interview question generation and answer evaluation
+    private Limit interview = new Limit();
+
     // Website Generator API
     private Limit websiteGenerator = new Limit();
 

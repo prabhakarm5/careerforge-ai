@@ -181,6 +181,14 @@ app:
       capacity: 8
       refill-tokens: 8
       refill-minutes: 1
+    cover-letter:
+      capacity: ${COVER_LETTER_RATE_CAPACITY:6}
+      refill-tokens: ${COVER_LETTER_RATE_REFILL_TOKENS:6}
+      refill-minutes: ${COVER_LETTER_RATE_REFILL_MINUTES:1}
+    interview:
+      capacity: ${INTERVIEW_RATE_CAPACITY:10}
+      refill-tokens: ${INTERVIEW_RATE_REFILL_TOKENS:10}
+      refill-minutes: ${INTERVIEW_RATE_REFILL_MINUTES:1}
     vision:
       capacity: 15
       refill-tokens: 15
@@ -417,6 +425,11 @@ openrouter:
 # Add GEMINI_API_KEY only in environment/secrets; never commit the key.
 # =========================================
 gemini:
+  live:
+    enabled: ${GEMINI_LIVE_ENABLED:true}
+    model: ${GEMINI_LIVE_MODEL:gemini-3.1-flash-live-preview}
+    voice: ${GEMINI_LIVE_VOICE:Kore}
+    session-minutes: ${GEMINI_LIVE_SESSION_MINUTES:15}
   resume:
     api-key: ${GEMINI_API_KEY:CHANGE_ME_GEMINI_API_KEY}
     base-url: https://generativelanguage.googleapis.com
@@ -501,6 +514,9 @@ trackai:
     resume-chat: ${TOKEN_COST_RESUME_CHAT:5}
     resume-match: ${TOKEN_COST_RESUME_MATCH:20}
     resume-generate: ${TOKEN_COST_RESUME_GENERATE:40}
+    cover-letter: ${TOKEN_COST_COVER_LETTER:25}
+    interview-start: ${TOKEN_COST_INTERVIEW_START:10}
+    interview-answer: ${TOKEN_COST_INTERVIEW_ANSWER:10}
     website: 500
     pdf: 50
     audio: 80

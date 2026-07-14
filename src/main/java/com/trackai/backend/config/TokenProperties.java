@@ -27,6 +27,12 @@ public class TokenProperties {
 
     private Long resumeGenerate;
 
+    private Long coverLetter;
+
+    private Long interviewStart;
+
+    private Long interviewAnswer;
+
     private Long website;
 
     private Long pdf;

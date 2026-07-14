@@ -49,6 +49,24 @@ public class GlobalExceptionHandler {
                                 buildResponse(status, "Resume Processing Error", ex.getMessage(), request),
                                 status);
         }
+        @ExceptionHandler(CoverLetterException.class)
+        public ResponseEntity<ErrorResponse> handleCoverLetter(
+                        CoverLetterException ex,
+                        HttpServletRequest request) {
+                HttpStatus status = ex.getStatus();
+                return new ResponseEntity<>(
+                                buildResponse(status, "Cover Letter Error", ex.getMessage(), request),
+                                status);
+        }
+        @ExceptionHandler(InterviewException.class)
+        public ResponseEntity<ErrorResponse> handleInterview(
+                        InterviewException ex,
+                        HttpServletRequest request) {
+                HttpStatus status = ex.getStatus();
+                return new ResponseEntity<>(
+                                buildResponse(status, "Interview Error", ex.getMessage(), request),
+                                status);
+        }
         @ExceptionHandler(PromoCodeException.class)
         public ResponseEntity<ErrorResponse> handlePromoCode(
                         PromoCodeException ex,
