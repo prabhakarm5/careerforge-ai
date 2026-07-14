@@ -92,13 +92,22 @@ public class JwtUtil {
                 long sessionExpiry = System.currentTimeMillis()
                                 + adminAbsoluteSessionExpiry.toMillis();
 
+                return generateAdminAccessToken(email, userId, fingerprint, sessionExpiry);
+        }
+
+        public String generateAdminAccessToken(
+                        String email,
+                        String userId,
+                        String fingerprint,
+                        long absoluteExpiry) {
+
                 return Jwts.builder()
                                 .setSubject(email)
                                 .claim("type", "ACCESS")
                                 .claim("role", "ROLE_ADMIN")
                                 .claim("userId", userId)
                                 .claim("fingerprint", fingerprint)
-                                .claim("absoluteExpiry", sessionExpiry)
+                                .claim("absoluteExpiry", absoluteExpiry)
                                 .setIssuedAt(new Date())
                                 .setExpiration(new Date(
                                                 System.currentTimeMillis() + adminAccessTokenExpiry.toMillis()))

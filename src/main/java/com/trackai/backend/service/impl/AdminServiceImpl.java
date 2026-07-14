@@ -1,6 +1,7 @@
 package com.trackai.backend.service.impl;
 
 import com.trackai.backend.dto.ActionResponse;
+import com.trackai.backend.dto.admin.AdminUserResponse;
 import com.trackai.backend.dto.UpdateProfileRequest;
 import com.trackai.backend.dto.UpdateProfileResponse;
 import com.trackai.backend.dto.cache.CachedUser;
@@ -51,13 +52,11 @@ public class AdminServiceImpl
         }
 
         @Override
-        public Page<User> getUsers(String search, Pageable pageable) {
+        public Page<AdminUserResponse> getUsers(String search, Pageable pageable) {
                 if (search == null || search.isBlank()) {
-                        return userRepository.findAll(pageable);
+                        return userRepository.findAdminUsers(pageable);
                 }
-                String query = search.trim();
-                return userRepository.findByEmailContainingIgnoreCaseOrNameContainingIgnoreCase(
-                                query, query, pageable);
+                return userRepository.searchAdminUsers(search.trim(), pageable);
         }
         // GET USER BY ID
         @Override

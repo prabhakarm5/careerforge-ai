@@ -1,6 +1,7 @@
 package com.trackai.backend.service;
 
 import com.trackai.backend.dto.ActionResponse;
+import com.trackai.backend.dto.admin.AdminUserResponse;
 import com.trackai.backend.dto.UpdateProfileRequest;
 import com.trackai.backend.dto.UpdateProfileResponse;
 import com.trackai.backend.dto.admin.AdminMessageRequest;
@@ -15,7 +16,7 @@ public interface AdminService {
     // Kept for internal compatibility; API uses the paginated safe DTO endpoint.
     List<User> getAllUsers();
 
-    Page<User> getUsers(String search, Pageable pageable);
+    Page<AdminUserResponse> getUsers(String search, Pageable pageable);
 
     User getUserById(String id);
 

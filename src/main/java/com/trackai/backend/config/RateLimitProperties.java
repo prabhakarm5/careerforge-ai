@@ -67,6 +67,9 @@ public class RateLimitProperties {
     private Limit promoClaim = new Limit();
     private Limit jobSearch = new Limit();
 
+    // Support ticket creation and replies.
+    private Limit support = new Limit();
+
     // Create Order API
     private Limit createOrder = new Limit();
 

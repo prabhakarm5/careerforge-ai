@@ -41,7 +41,7 @@ public class AdminController {
         int safeSize = Math.min(100, Math.max(1, size));
         PageRequest pageable = PageRequest.of(
                 safePage, safeSize, Sort.by(Sort.Direction.DESC, "createdAt"));
-        return ResponseEntity.ok(adminService.getUsers(q, pageable).map(AdminUserResponse::from));
+        return ResponseEntity.ok(adminService.getUsers(q, pageable));
     }
 
     @GetMapping("/users/{id}")

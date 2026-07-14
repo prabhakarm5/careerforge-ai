@@ -56,4 +56,14 @@ public class PaymentTransaction {
 
     private LocalDateTime updatedAt;
     private String failureReason;
+
+    // Gateway/recovery metadata keeps reconciliation restart-safe and visible.
+    private String gatewayStatus;
+
+    @Builder.Default
+    @Column
+    private Integer reconciliationAttempts = 0;
+
+    private LocalDateTime lastReconciledAt;
+    private LocalDateTime settledAt;
 }

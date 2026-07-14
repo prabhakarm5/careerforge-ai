@@ -8,8 +8,8 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "conversations", indexes = {
-        @Index(name = "idx_conversations_user_archived_updated", columnList = "userId, archived, updatedAt"),
-        @Index(name = "idx_conversations_user_title", columnList = "userId, title")
+        @Index(name = "idx_conversations_user_archived_updated", columnList = "user_id, archived, updated_at"),
+        @Index(name = "idx_conversations_user_title", columnList = "user_id, title")
 })
 @Getter
 @Setter

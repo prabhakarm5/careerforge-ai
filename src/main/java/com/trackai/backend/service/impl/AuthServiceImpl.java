@@ -365,6 +365,18 @@ public class AuthServiceImpl implements AuthService {
                                         jwtUtil.extractEmail(
                                                         refreshToken));
 
+                        String tokenFingerprint = normalizeFingerprint(
+                                        jwtUtil.extractFingerprint(refreshToken));
+                        if (!fingerprint.equals(tokenFingerprint)) {
+                                throw new RuntimeException("Refresh token fingerprint does not match this device");
+                        }
+
+                        String role = jwtUtil.extractRole(refreshToken);
+                        if (!Role.ROLE_USER.name().equals(role)
+                                        && !Role.ROLE_ADMIN.name().equals(role)) {
+                                throw new RuntimeException("Invalid refresh token role");
+                        }
+
                         String userId = jwtUtil.extractUserId(refreshToken);
                         if (userId == null || userId.isBlank()) {
                                 CachedUser cachedUser = redisUserCacheService.getUser(email);
@@ -377,15 +389,23 @@ public class AuthServiceImpl implements AuthService {
 
                         // Generate the replacement first, then atomically compare-and-set it.
                         // This removes separate Redis GET, DELETE and SET round trips.
-                        String newAccessToken = jwtUtil.generateAccessToken(
-                                        email,
-                                        userId,
-                                        fingerprint);
-
-                        String newRefreshToken = jwtUtil.generateRefreshToken(
-                                        email,
-                                        userId,
-                                        fingerprint);
+                        String newAccessToken;
+                        String newRefreshToken;
+                        if (Role.ROLE_ADMIN.name().equals(role)) {
+                                long absoluteExpiry = jwtUtil.extractAbsoluteExpiry(refreshToken);
+                                if (absoluteExpiry <= System.currentTimeMillis()) {
+                                        throw new RuntimeException("Admin session has reached its absolute expiry");
+                                }
+                                newAccessToken = jwtUtil.generateAdminAccessToken(
+                                                email, userId, fingerprint, absoluteExpiry);
+                                newRefreshToken = jwtUtil.generateAdminRefreshToken(
+                                                email, userId, fingerprint, absoluteExpiry);
+                        } else {
+                                newAccessToken = jwtUtil.generateAccessToken(
+                                                email, userId, fingerprint);
+                                newRefreshToken = jwtUtil.generateRefreshToken(
+                                                email, userId, fingerprint);
+                        }
 
                         boolean rotated = redisRefreshTokenService.rotateRefreshToken(
                                         email,
@@ -402,6 +422,7 @@ public class AuthServiceImpl implements AuthService {
                                         .accessToken(newAccessToken)
                                         .refreshToken(newRefreshToken)
                                         .tokenType("Bearer")
+                                        .role(role)
                                         .message(
                                                         "Access token refreshed successfully")
                                         .build();

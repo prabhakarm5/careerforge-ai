@@ -17,21 +17,17 @@ import com.trackai.backend.enums.PaymentStatus;
 import com.trackai.backend.repository.PaymentTransactionRepository;
 import com.trackai.backend.repository.SubscriptionPlanRepository;
 import com.trackai.backend.repository.UserRepository;
-import com.trackai.backend.service.MailService;
+import com.trackai.backend.security.JwtUserPrincipal;
 import com.trackai.backend.service.PaymentService;
-import com.trackai.backend.service.PdfInvoiceService;
+import com.trackai.backend.service.PaymentSettlementService;
 import com.trackai.backend.service.PromoCodeService;
 import com.trackai.backend.service.PromoCodeService.PromoApplication;
 import com.trackai.backend.service.RedisRateLimitService;
-import com.trackai.backend.service.WalletService;
 
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -49,12 +45,10 @@ public class PaymentServiceImpl implements PaymentService {
         private final SubscriptionPlanRepository subscriptionPlanRepository;
         private final PaymentTransactionRepository paymentTransactionRepository;
         private final RazorpayClient razorpayClient;
-        private final WalletService walletService;
         private final RedisRateLimitService redisRateLimitService;
         private final RateLimitProperties rateLimitProperties;
-        private final MailService mailService;
-        private final PdfInvoiceService pdfInvoiceService;
         private final PromoCodeService promoCodeService;
+        private final PaymentSettlementService paymentSettlementService;
 
         @Value("${razorpay.key-id}")
         private String keyId;
@@ -65,14 +59,17 @@ public class PaymentServiceImpl implements PaymentService {
         @Value("${razorpay.webhook-secret}")
         private String webhookSecret;
 
-        // Refund SLA shown to the user in the failure email — keep this in one
-        // place so the message and any future logic stay in sync.
-        private static final int REFUND_SLA_DAYS = 7;
-
         private User getAuthenticatedUser() {
                 Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-                String email = authentication.getName();
-                return userRepository.findByEmail(email)
+                if (authentication.getPrincipal() instanceof JwtUserPrincipal principal
+                                && principal.userId() != null && !principal.userId().isBlank()) {
+                        return User.builder()
+                                        .id(principal.userId())
+                                        .email(principal.email())
+                                        .role(com.trackai.backend.enums.Role.valueOf(principal.role()))
+                                        .build();
+                }
+                return userRepository.findByEmail(authentication.getName())
                                 .orElseThrow(() -> new RuntimeException("User not found"));
         }
 
@@ -136,7 +133,6 @@ public class PaymentServiceImpl implements PaymentService {
         }
         // ───────────────────────── VERIFY PAYMENT (client redirect flow)
         // ─────────────────────────
-        @Transactional
         @Override
         public void verifyPayment(VerifyPaymentRequest request) {
 
@@ -162,7 +158,8 @@ public class PaymentServiceImpl implements PaymentService {
                         boolean verified = Utils.verifyPaymentSignature(attributes, keySecret);
 
                         if (!verified) {
-                                markFailed(request.getRazorpayOrderId(), "Signature mismatch");
+                                paymentSettlementService.markFailed(
+                                                request.getRazorpayOrderId(), "Signature mismatch", "signature_mismatch");
                                 throw new RuntimeException("Invalid payment signature");
                         }
 
@@ -174,8 +171,9 @@ public class PaymentServiceImpl implements PaymentService {
                         // that belongs to someone else's session/browser history.
                         // ─────────────────────────────────────────────────────────
                         PaymentTransaction existing = paymentTransactionRepository
-                                        .findByOrderId(request.getRazorpayOrderId())
-                                        .orElseThrow(() -> new RuntimeException("Order not found"));
+                                        .findByOrderIdAndUserId(request.getRazorpayOrderId(), user.getId())
+                                        .orElseThrow(() -> new RuntimeException(
+                                                        "Order not found or does not belong to your account"));
 
                         if (!existing.getUserId().equals(user.getId())) {
                                 log.warn("User {} attempted to verify order {} belonging to user {}",
@@ -183,7 +181,8 @@ public class PaymentServiceImpl implements PaymentService {
                                 throw new RuntimeException("This order does not belong to your account");
                         }
 
-                        processSuccessfulPayment(request.getRazorpayOrderId(), request.getRazorpayPaymentId());
+                        paymentSettlementService.settleCaptured(
+                                        request.getRazorpayOrderId(), request.getRazorpayPaymentId());
 
                 } catch (RuntimeException e) {
                         throw e;
@@ -194,7 +193,6 @@ public class PaymentServiceImpl implements PaymentService {
 
         // ───────────────────────── WEBHOOK (source of truth, prevents fake/duplicate
         // payments) ─────────────────────────
-        @Transactional
         @Override
         public void handleWebhook(String payload, String signatureHeader) {
 
@@ -223,140 +221,12 @@ public class PaymentServiceImpl implements PaymentService {
                 String paymentId = paymentEntity.optString("id");
 
                 switch (event) {
-                        case "payment.captured" -> processSuccessfulPayment(orderId, paymentId);
+                        case "payment.captured" -> paymentSettlementService.settleCaptured(orderId, paymentId);
                         case "payment.failed" -> {
                                 String reason = paymentEntity.optString("error_description", "Payment failed");
-                                markFailed(orderId, reason);
+                                paymentSettlementService.markFailed(orderId, reason, "failed");
                         }
                         default -> log.info("Unhandled webhook event: {}", event);
-                }
-        }
-
-        // ───────────────────────── SHARED IDEMPOTENT SUCCESS HANDLER
-        // ─────────────────────────
-        private void processSuccessfulPayment(String orderId, String paymentId) {
-
-                PaymentTransaction paymentTransaction = paymentTransactionRepository.findByOrderId(orderId)
-                                .orElseThrow(() -> new RuntimeException("Payment not found for order " + orderId));
-
-                // idempotency: already processed (either by client verify or webhook) -> no-op
-                if (paymentTransaction.getStatus() == PaymentStatus.SUCCESS) {
-                        log.info("Payment {} already processed, skipping duplicate", orderId);
-                        return;
-                }
-
-                if (paymentTransaction.getStatus() == PaymentStatus.SUCCESS) {
-                        log.info("Already processed");
-                        return;
-                }
-
-                if (paymentTransaction.getStatus() == PaymentStatus.FAILED) {
-                        log.warn("Ignoring success because payment already marked failed");
-                        return;
-                }
-
-                SubscriptionPlan plan = subscriptionPlanRepository.findById(paymentTransaction.getSubscriptionPlanId())
-                                .orElseThrow(() -> new RuntimeException("Plan not found"));
-
-                paymentTransaction.setPaymentId(paymentId);
-                paymentTransaction.setStatus(PaymentStatus.SUCCESS);
-                paymentTransaction.setUpdatedAt(LocalDateTime.now());
-
-                try {
-                        paymentTransactionRepository.save(paymentTransaction);
-                } catch (DataIntegrityViolationException e) {
-                        // paymentId unique constraint hit -> this paymentId already used for another
-                        // row = fraud/duplicate attempt
-                        log.error("Duplicate paymentId insert blocked: {}", paymentId);
-                        return;
-                }
-
-                walletService.applyPlanToWallet(
-                                paymentTransaction.getUserId(),
-                                plan);
-
-                // ─────────────────────────────────────────────────────────
-                // MAIL IS FIRE-AND-FORGET FROM HERE:
-                // Wallet credit (the thing that actually matters to the user)
-                // is already committed above. Building the PDF + sending mail
-                // is slow (SMTP round-trip) and must NEVER block or fail the
-                // payment transaction — so it's handed off to an async method.
-                // If mail sending throws, it's caught/logged inside that method
-                // and never bubbles back here.
-                // ─────────────────────────────────────────────────────────
-                User user = userRepository.findById(paymentTransaction.getUserId()).orElse(null);
-                if (user != null) {
-                        sendSuccessMailAsync(user.getName(), user.getEmail(), paymentTransaction, plan);
-                }
-        }
-
-        // Runs on a separate thread (see AsyncConfig) so verifyPayment()/webhook
-        // response returns immediately after the DB commit, without waiting on
-        // PDF generation + SMTP.
-        @Async
-        public void sendSuccessMailAsync(String userName, String userEmail,
-                        PaymentTransaction paymentTransaction, SubscriptionPlan plan) {
-                try {
-                        byte[] invoicePdf = pdfInvoiceService.generateInvoice(
-                                        // re-fetch not needed — passed in already
-                                        userRepository.findById(paymentTransaction.getUserId()).orElseThrow(),
-                                        paymentTransaction, plan, true, null);
-
-                        mailService.sendPaymentSuccessEmail(userName, userEmail, paymentTransaction, invoicePdf);
-
-                } catch (Exception e) {
-                        // Never let a mail failure look like a payment failure —
-                        // just log it so it can be investigated/resent manually.
-                        log.error("Failed to send success email for order {}: {}",
-                                        paymentTransaction.getOrderId(), e.getMessage());
-                }
-        }
-
-        private void markFailed(String orderId, String reason) {
-
-                paymentTransactionRepository.findByOrderId(orderId).ifPresent(paymentTransaction -> {
-
-                        if (paymentTransaction.getStatus() == PaymentStatus.SUCCESS) {
-                                return;
-                        }
-
-                        if (paymentTransaction.getStatus() == PaymentStatus.FAILED) {
-                                return;
-                        }
-
-                        if (paymentTransaction.getStatus() == PaymentStatus.SUCCESS)
-                                return; // never downgrade a success
-
-                        paymentTransaction.setStatus(PaymentStatus.FAILED);
-                        paymentTransaction.setFailureReason(reason);
-                        paymentTransaction.setUpdatedAt(LocalDateTime.now());
-                        paymentTransactionRepository.save(paymentTransaction);
-
-                        User user = userRepository.findById(paymentTransaction.getUserId()).orElse(null);
-                        SubscriptionPlan plan = subscriptionPlanRepository
-                                        .findById(paymentTransaction.getSubscriptionPlanId()).orElse(null);
-
-                        if (user != null && plan != null) {
-                                // Failure mail is async too — same reasoning as success mail.
-                                sendFailedMailAsync(user.getName(), user.getEmail(), paymentTransaction, plan, reason);
-                        }
-                });
-        }
-
-        @Async
-        public void sendFailedMailAsync(String userName, String userEmail,
-                        PaymentTransaction paymentTransaction, SubscriptionPlan plan, String reason) {
-                try {
-                        byte[] invoicePdf = pdfInvoiceService.generateInvoice(
-                                        userRepository.findById(paymentTransaction.getUserId()).orElseThrow(),
-                                        paymentTransaction, plan, false, reason);
-
-                        mailService.sendPaymentFailedEmail(userName, userEmail, paymentTransaction, reason,
-                                        invoicePdf, REFUND_SLA_DAYS);
-
-                } catch (Exception e) {
-                        log.error("Failed to send failure email for order {}: {}",
-                                        paymentTransaction.getOrderId(), e.getMessage());
                 }
         }
 
@@ -387,47 +257,32 @@ public class PaymentServiceImpl implements PaymentService {
                                                 .status(payment.getStatus())
                                                 .gateway(payment.getGateway())
                                                 .createdAt(payment.getCreatedAt())
+                                                .updatedAt(payment.getUpdatedAt())
+                                                .settledAt(payment.getSettledAt())
+                                                .failureReason(payment.getFailureReason())
+                                                .gatewayStatus(payment.getGatewayStatus())
+                                                .subscriptionPlanId(payment.getSubscriptionPlanId())
+                                                .originalAmount(payment.getOriginalAmount())
+                                                .discountAmount(payment.getDiscountAmount())
                                                 .build())
                                 .toList();
         }
 
         @Override
-        @Transactional
         public void markPaymentCancelled(String orderId, String reason) {
-
-                PaymentTransaction paymentTransaction = paymentTransactionRepository
-                                .findByOrderId(orderId)
-                                .orElseThrow(() -> new RuntimeException("Payment not found"));
-
-                // already successful payment ko kabhi change mat karo
-                if (paymentTransaction.getStatus() == PaymentStatus.SUCCESS) {
+                User user = getAuthenticatedUser();
+                PaymentTransaction transaction = paymentTransactionRepository
+                                .findByOrderIdAndUserId(orderId, user.getId())
+                                .orElseThrow(() -> new RuntimeException(
+                                                "Payment not found or does not belong to your account"));
+                if (transaction.getStatus() == PaymentStatus.SUCCESS) {
                         return;
                 }
 
-                paymentTransaction.setStatus(PaymentStatus.FAILED);
-                paymentTransaction.setFailureReason(reason);
-                paymentTransaction.setUpdatedAt(LocalDateTime.now());
-
-                paymentTransactionRepository.save(paymentTransaction);
-
-                User user = userRepository
-                                .findById(paymentTransaction.getUserId())
-                                .orElse(null);
-
-                SubscriptionPlan plan = subscriptionPlanRepository
-                                .findById(paymentTransaction.getSubscriptionPlanId())
-                                .orElse(null);
-
-                if (user != null && plan != null) {
-
-                        sendFailedMailAsync(
-                                        user.getName(),
-                                        user.getEmail(),
-                                        paymentTransaction,
-                                        plan,
-                                        reason);
-                }
-
-                log.info("Payment {} marked as FAILED : {}", orderId, reason);
+                paymentSettlementService.markFailed(
+                                orderId,
+                                reason == null ? "Payment cancelled by user" : reason,
+                                "client_cancelled");
+                log.info("Payment {} marked as failed by the checkout client", orderId);
         }
 }

@@ -25,5 +25,8 @@ public class RefreshTokenResponse {
 
     private String tokenType;
 
+    // Server-authoritative role used while restoring a browser tab.
+    private String role;
+
     private String message;
 }

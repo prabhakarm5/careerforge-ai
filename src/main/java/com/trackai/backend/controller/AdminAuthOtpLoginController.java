@@ -23,13 +23,7 @@ public class AdminAuthOtpLoginController {
 
         private final AdminOtpLoginService adminOtpLoginService;
         private final CookieUtil cookieUtil;
-
-        // ✅ FIX — pehle static final Duration bina initialize kiye declare tha
-        // (compile error) aur neeche galat naam (_DURATION suffix missing) use
-        // ho raha tha. Ab dono expiry yml se @Value se aa rahi hain — kahin
-        // bhi hardcoded nahi.
-        @Value("${app.admin.access-token-expiry}")
-        private Duration adminAccessTokenExpiry;
+        // Admin refresh-cookie lifetime is configured centrally in application-common.yml.
 
         @Value("${app.admin.refresh-token-expiry}")
         private Duration adminRefreshTokenExpiry;
@@ -74,21 +68,14 @@ public class AdminAuthOtpLoginController {
                                 result.getRefreshToken(),
                                 adminRefreshTokenExpiry);
 
-                // ✅ Admin access token — httpOnly cookie (body mein nahi jayega)
-                cookieUtil.addAccessTokenCookie(
-                                httpResponse,
-                                result.getAccessToken(),
-                                adminAccessTokenExpiry);
-
                 // ✅ Fingerprint — httpOnly cookie (admin refresh/logout endpoints
                 // isi se fingerprint read karenge, body se nahi)
                 cookieUtil.addFingerprintCookie(
                                 httpResponse,
                                 result.getFingerprint(),
                                 adminRefreshTokenExpiry);
-
-                // refreshToken/accessToken/fingerprint — teeno @JsonIgnore honi chahiye
-                // LoginResponse DTO mein, taaki body mein na jaayein
+                // Refresh token and fingerprint remain HttpOnly; access token is returned
+                // once and held only in frontend memory.
                 return ResponseEntity.ok(result);
         }
 

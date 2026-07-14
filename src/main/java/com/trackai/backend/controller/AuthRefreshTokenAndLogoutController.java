@@ -35,6 +35,9 @@ public class AuthRefreshTokenAndLogoutController {
         @Value("${app.jwt.refresh-token-expiry}")
         private Duration refreshTokenExpiry;
 
+        @Value("${app.admin.refresh-token-expiry}")
+        private Duration adminRefreshTokenExpiry;
+
         // ============================================================
         // REFRESH ACCESS TOKEN
         // ============================================================
@@ -88,7 +91,9 @@ public class AuthRefreshTokenAndLogoutController {
                 cookieUtil.addRefreshTokenCookie(
                                 httpResponse,
                                 result.getRefreshToken(),
-                                refreshTokenExpiry);
+                                "ROLE_ADMIN".equals(result.getRole())
+                                                ? adminRefreshTokenExpiry
+                                                : refreshTokenExpiry);
                 // Access token cookie intentionally set nahi hoti; body se frontend memory mein jayega.
 
                 // fingerprint cookie same rehti hai (rotate nahi hoti), isliye dobara set

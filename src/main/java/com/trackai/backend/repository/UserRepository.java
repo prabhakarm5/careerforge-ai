@@ -1,5 +1,6 @@
 package com.trackai.backend.repository;
 
+import com.trackai.backend.dto.admin.AdminUserResponse;
 import com.trackai.backend.entity.User;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -16,8 +17,25 @@ public interface UserRepository extends JpaRepository<User, String> {
 
     Optional<User> findByMobileNumber(String mobileNumber);
 
-    Page<User> findByEmailContainingIgnoreCaseOrNameContainingIgnoreCase(
-            String email, String name, Pageable pageable);
+    @Query("""
+            select new com.trackai.backend.dto.admin.AdminUserResponse(
+                    u.id, u.name, u.email, u.role, u.createdAt,
+                    u.enabled, u.blocked, u.emailVerified, u.profileImage)
+            from User u
+            """)
+    Page<AdminUserResponse> findAdminUsers(Pageable pageable);
+
+    @Query("""
+            select new com.trackai.backend.dto.admin.AdminUserResponse(
+                    u.id, u.name, u.email, u.role, u.createdAt,
+                    u.enabled, u.blocked, u.emailVerified, u.profileImage)
+            from User u
+            where lower(u.email) like lower(concat('%', :search, '%'))
+               or lower(u.name) like lower(concat('%', :search, '%'))
+            """)
+    Page<AdminUserResponse> searchAdminUsers(
+            @Param("search") String search,
+            Pageable pageable);
 
     // A single aggregate query keeps the live admin dashboard inexpensive.
     @Query("""

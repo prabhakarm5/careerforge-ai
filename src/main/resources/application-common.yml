@@ -89,6 +89,20 @@ app:
     resend-wait-minutes: 2
 
   # ---------------------------------------
+  # PAYMENT RECOVERY
+  # Razorpay is queried after restarts for pending/failed local orders.
+  # ---------------------------------------
+  payment:
+    refund-sla-days: ${PAYMENT_REFUND_SLA_DAYS:7}
+    reconciliation:
+      enabled: ${PAYMENT_RECONCILIATION_ENABLED:true}
+      initial-delay-ms: ${PAYMENT_RECONCILIATION_INITIAL_DELAY_MS:30000}
+      fixed-delay-ms: ${PAYMENT_RECONCILIATION_FIXED_DELAY_MS:120000}
+      retry-after-seconds: ${PAYMENT_RECONCILIATION_RETRY_AFTER_SECONDS:120}
+      lookback-days: ${PAYMENT_RECONCILIATION_LOOKBACK_DAYS:7}
+      batch-size: ${PAYMENT_RECONCILIATION_BATCH_SIZE:25}
+      max-attempts: ${PAYMENT_RECONCILIATION_MAX_ATTEMPTS:30}
+  # ---------------------------------------
   # RATE LIMITING (Token Bucket per endpoint)
   # Format: capacity = max burst, refill = tokens/minute
   # ---------------------------------------
@@ -189,6 +203,10 @@ app:
       capacity: 12
       refill-tokens: 12
       refill-minutes: 1
+    support:
+      capacity: ${SUPPORT_RATE_LIMIT_CAPACITY:10}
+      refill-tokens: ${SUPPORT_RATE_LIMIT_REFILL_TOKENS:10}
+      refill-minutes: ${SUPPORT_RATE_LIMIT_REFILL_MINUTES:1}
 
     # --- Payments ---
     create-order:

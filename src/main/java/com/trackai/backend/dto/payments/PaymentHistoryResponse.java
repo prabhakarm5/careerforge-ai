@@ -27,4 +27,11 @@ public class PaymentHistoryResponse {
     private PaymentGateway gateway;
 
     private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+    private LocalDateTime settledAt;
+    private String failureReason;
+    private String gatewayStatus;
+    private String subscriptionPlanId;
+    private Long originalAmount;
+    private Long discountAmount;
 }

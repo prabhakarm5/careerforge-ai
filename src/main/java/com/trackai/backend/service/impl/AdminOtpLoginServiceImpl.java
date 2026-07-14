@@ -251,7 +251,8 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 String accessToken = jwtUtil.generateAdminAccessToken(
                                 user.getEmail(),
                                 user.getId(),
-                                fingerprint);
+                                fingerprint,
+                                absoluteExpiry);
 
                 String refreshToken = jwtUtil.generateAdminRefreshToken(
                                 user.getEmail(),
