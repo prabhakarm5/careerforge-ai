@@ -91,6 +91,11 @@ public class GroqServiceImpl implements GroqService {
                           else.
                         - For explicit code/file/page requests, provide a compact complete working result and finish
                           cleanly. Never output mojibake, giant data URLs, or claims of web search that did not happen.
+                        - For a web page or single-file HTML request, put the entire source in exactly one Markdown
+                          code fence labelled html. Include doctype, head, body, and closing html tag. Never emit
+                          raw HTML outside that fence.
+                        - If the requested page is too large for the answer budget, reduce repetition and detail so
+                          the complete working file still finishes. Never leave a half-written section or open tag.
                         - If an image is attached, analyze it before answering.
                         - Never identify yourself as an underlying model. You are CareerForge AI.
                         """;

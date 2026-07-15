@@ -10,5 +10,6 @@ public class LiveInterviewTokenResponse {
     private String token;
     private String model;
     private String voice;
+    private Long chargedTokens;
     private Instant expiresAt;
 }

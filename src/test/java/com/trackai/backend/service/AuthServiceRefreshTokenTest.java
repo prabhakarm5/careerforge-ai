@@ -3,6 +3,8 @@ package com.trackai.backend.service;
 import com.trackai.backend.config.RateLimitProperties;
 import com.trackai.backend.dto.RateLimitResponse;
 import com.trackai.backend.dto.RefreshTokenResponse;
+import com.trackai.backend.exception.InvalidCredentialsException;
+import com.trackai.backend.exception.RateLimitExceededException;
 import com.trackai.backend.repository.UserRepository;
 import com.trackai.backend.security.JwtUtil;
 import com.trackai.backend.service.impl.AuthServiceImpl;
@@ -13,8 +15,10 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.data.redis.RedisConnectionFailureException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -96,5 +100,51 @@ class AuthServiceRefreshTokenTest {
         assertThat(response.getRole()).isEqualTo("ROLE_USER");
         verify(jwtUtil, never()).generateAdminAccessToken(
                 anyString(), anyString(), anyString(), anyLong());
+    }
+    @Test
+    void refreshRateLimitReturnsDedicatedException() {
+        when(redisRateLimitService.allowRequest(anyString(), anyLong(), anyLong(), anyLong()))
+                .thenReturn(RateLimitResponse.builder().allowed(false).message("Try later").build());
+
+        assertThatThrownBy(() -> authService.refreshAccessToken("token", "device"))
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage("Try later");
+    }
+
+    @Test
+    void invalidRotationIsAnUnauthorizedSessionFailure() {
+        String oldToken = "old-user-refresh";
+        when(jwtUtil.extractTokenType(oldToken)).thenReturn("REFRESH");
+        when(jwtUtil.extractEmail(oldToken)).thenReturn("user@example.com");
+        when(jwtUtil.extractFingerprint(oldToken)).thenReturn("device-2");
+        when(jwtUtil.extractRole(oldToken)).thenReturn("ROLE_USER");
+        when(jwtUtil.extractUserId(oldToken)).thenReturn("user-id");
+        when(jwtUtil.generateAccessToken("user@example.com", "user-id", "device-2"))
+                .thenReturn("new-user-access");
+        when(jwtUtil.generateRefreshToken("user@example.com", "user-id", "device-2"))
+                .thenReturn("new-user-refresh");
+
+        assertThatThrownBy(() -> authService.refreshAccessToken(oldToken, "device-2"))
+                .isInstanceOf(InvalidCredentialsException.class);
+    }
+
+    @Test
+    void redisOutageIsNotReportedAsAnExpiredSession() {
+        String oldToken = "old-user-refresh";
+        when(jwtUtil.extractTokenType(oldToken)).thenReturn("REFRESH");
+        when(jwtUtil.extractEmail(oldToken)).thenReturn("user@example.com");
+        when(jwtUtil.extractFingerprint(oldToken)).thenReturn("device-2");
+        when(jwtUtil.extractRole(oldToken)).thenReturn("ROLE_USER");
+        when(jwtUtil.extractUserId(oldToken)).thenReturn("user-id");
+        when(jwtUtil.generateAccessToken("user@example.com", "user-id", "device-2"))
+                .thenReturn("new-user-access");
+        when(jwtUtil.generateRefreshToken("user@example.com", "user-id", "device-2"))
+                .thenReturn("new-user-refresh");
+        when(redisRefreshTokenService.rotateRefreshToken(
+                "user@example.com", "device-2", oldToken, "new-user-refresh"))
+                .thenThrow(new RedisConnectionFailureException("Redis unavailable"));
+
+        assertThatThrownBy(() -> authService.refreshAccessToken(oldToken, "device-2"))
+                .isInstanceOf(RedisConnectionFailureException.class);
     }
 }

@@ -33,6 +33,8 @@ public class TokenProperties {
 
     private Long interviewAnswer;
 
+    private Long interviewLive;
+
     private Long website;
 
     private Long pdf;

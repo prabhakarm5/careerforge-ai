@@ -10,6 +10,8 @@ import com.trackai.backend.dto.cache.CachedUser;
 import com.trackai.backend.dto.cloudinary.CloudinaryUploadResponse;
 import com.trackai.backend.entity.User;
 import com.trackai.backend.enums.Role;
+import com.trackai.backend.exception.InvalidCredentialsException;
+import com.trackai.backend.exception.RateLimitExceededException;
 import com.trackai.backend.repository.UserRepository;
 import com.trackai.backend.security.JwtUtil;
 import com.trackai.backend.service.AuthService;
@@ -342,7 +344,7 @@ public class AuthServiceImpl implements AuthService {
                 // Block request
                 if (!rateLimitResponse.isAllowed()) {
 
-                        throw new RuntimeException(
+                        throw new RateLimitExceededException(
                                         rateLimitResponse.getMessage());
                 }
 
@@ -356,7 +358,7 @@ public class AuthServiceImpl implements AuthService {
 
                         if (!tokenType.equals("REFRESH")) {
 
-                                throw new RuntimeException(
+                                throw new InvalidCredentialsException(
                                                 "Invalid refresh token");
                         }
 
@@ -368,13 +370,13 @@ public class AuthServiceImpl implements AuthService {
                         String tokenFingerprint = normalizeFingerprint(
                                         jwtUtil.extractFingerprint(refreshToken));
                         if (!fingerprint.equals(tokenFingerprint)) {
-                                throw new RuntimeException("Refresh token fingerprint does not match this device");
+                                throw new InvalidCredentialsException("Refresh token does not belong to this device");
                         }
 
                         String role = jwtUtil.extractRole(refreshToken);
                         if (!Role.ROLE_USER.name().equals(role)
                                         && !Role.ROLE_ADMIN.name().equals(role)) {
-                                throw new RuntimeException("Invalid refresh token role");
+                                throw new InvalidCredentialsException("Invalid refresh token role");
                         }
 
                         String userId = jwtUtil.extractUserId(refreshToken);
@@ -383,7 +385,7 @@ public class AuthServiceImpl implements AuthService {
                                 userId = cachedUser != null
                                                 ? cachedUser.getId()
                                                 : userRepository.findByEmail(email)
-                                                                .orElseThrow(() -> new RuntimeException("User not found"))
+                                                                .orElseThrow(() -> new InvalidCredentialsException("Session user no longer exists"))
                                                                 .getId();
                         }
 
@@ -394,7 +396,7 @@ public class AuthServiceImpl implements AuthService {
                         if (Role.ROLE_ADMIN.name().equals(role)) {
                                 long absoluteExpiry = jwtUtil.extractAbsoluteExpiry(refreshToken);
                                 if (absoluteExpiry <= System.currentTimeMillis()) {
-                                        throw new RuntimeException("Admin session has reached its absolute expiry");
+                                        throw new InvalidCredentialsException("Admin session has expired");
                                 }
                                 newAccessToken = jwtUtil.generateAdminAccessToken(
                                                 email, userId, fingerprint, absoluteExpiry);
@@ -414,7 +416,7 @@ public class AuthServiceImpl implements AuthService {
                                         newRefreshToken);
 
                         if (!rotated) {
-                                throw new RuntimeException(
+                                throw new InvalidCredentialsException(
                                                 "Refresh token expired, revoked, or already rotated");
                         }
                         // Response
@@ -427,10 +429,10 @@ public class AuthServiceImpl implements AuthService {
                                                         "Access token refreshed successfully")
                                         .build();
 
-                } catch (Exception e) {
-
-                        throw new RuntimeException(
-                                        "Invalid or expired refresh token");
+                } catch (InvalidCredentialsException e) {
+                        throw e;
+                } catch (io.jsonwebtoken.JwtException | IllegalArgumentException e) {
+                        throw new InvalidCredentialsException("Invalid or expired refresh token");
                 }
         }
 

@@ -517,6 +517,7 @@ trackai:
     cover-letter: ${TOKEN_COST_COVER_LETTER:25}
     interview-start: ${TOKEN_COST_INTERVIEW_START:10}
     interview-answer: ${TOKEN_COST_INTERVIEW_ANSWER:10}
+    interview-live: ${TOKEN_COST_INTERVIEW_LIVE:25}
     website: 500
     pdf: 50
     audio: 80

@@ -8,6 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
@@ -252,6 +254,19 @@ public class GlobalExceptionHandler {
                                 HttpStatus.TOO_MANY_REQUESTS);
         }
 
+        @ExceptionHandler({ RedisConnectionFailureException.class, QueryTimeoutException.class })
+        public ResponseEntity<ErrorResponse> handleTemporaryDataStoreFailure(
+                        RuntimeException ex,
+                        HttpServletRequest request) {
+
+                log.error("Temporary data-store failure at {} {}", request.getMethod(), request.getRequestURI(), ex);
+
+                return new ResponseEntity<>(
+                                buildResponse(HttpStatus.SERVICE_UNAVAILABLE, "Service Unavailable",
+                                                "Session service is temporarily unavailable. Please try again shortly.",
+                                                request),
+                                HttpStatus.SERVICE_UNAVAILABLE);
+        }
         @ExceptionHandler(OpenRouterException.class)
         public ResponseEntity<ErrorResponse> handleOpenRouterException(
                         OpenRouterException ex,

@@ -41,7 +41,7 @@ public class WalletExceptionHandler {
 
                         HttpServletRequest request) {
 
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
                                 .body(
 
                                                 WalletExceptionResponse.builder()

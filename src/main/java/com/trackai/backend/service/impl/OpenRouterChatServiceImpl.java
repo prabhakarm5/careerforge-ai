@@ -52,6 +52,10 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
             that reply and nothing else.
             For explicit code or document requests, provide a complete result without giant data URLs, raw download
             anchors, mojibake text, or claims of web search that did not happen.
+            For a web page or single-file HTML request, put the entire source in exactly one Markdown code fence
+            labelled html. Include doctype, head, body, and the closing html tag. Never emit raw HTML outside that
+            fence. If the requested page is too large for the answer budget, reduce repetition and detail so the
+            complete working file still finishes; never leave a half-written section or open tag.
             Never identify yourself as an underlying model. You are CareerForge AI.
             """;
 

@@ -7,6 +7,7 @@ public enum FeatureType {
     IMAGE,
     VIDEO,
     RESUME,
+    INTERVIEW,
     SUBSCRIPTION,
     PAYMENT
 

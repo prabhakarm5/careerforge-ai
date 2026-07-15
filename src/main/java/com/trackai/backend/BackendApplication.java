@@ -94,7 +94,6 @@ public class BackendApplication {
 
 				logger.info(
 						"Admin already exists");
-				logger.info(" Admin Email: " + adminEmail);
 			}
 		};
 	}

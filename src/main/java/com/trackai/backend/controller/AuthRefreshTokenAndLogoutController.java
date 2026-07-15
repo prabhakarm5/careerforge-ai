@@ -1,6 +1,7 @@
 package com.trackai.backend.controller;
 
 import com.trackai.backend.dto.RefreshTokenResponse;
+import com.trackai.backend.exception.InvalidCredentialsException;
 import com.trackai.backend.security.CookieUtil;
 import com.trackai.backend.service.AuthService;
 
@@ -74,13 +75,13 @@ public class AuthRefreshTokenAndLogoutController {
                 String fingerprintFromCookie = cookieUtil.extractFingerprintFromCookie(httpRequest);
 
                 if (refreshTokenFromCookie == null) {
-                        throw new RuntimeException(
-                                        "No refresh token found — please login again");
+                        throw new InvalidCredentialsException(
+                                        "No refresh token found. Please login again.");
                 }
 
                 if (fingerprintFromCookie == null) {
-                        throw new RuntimeException(
-                                        "No fingerprint found — please login again");
+                        throw new InvalidCredentialsException(
+                                        "No device fingerprint found. Please login again.");
                 }
 
                 RefreshTokenResponse result = authService.refreshAccessToken(
