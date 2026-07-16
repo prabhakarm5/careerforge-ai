@@ -7,4 +7,5 @@ import java.util.List;
 
 public interface SupportTicketMessageRepository extends JpaRepository<SupportTicketMessage, String> {
     List<SupportTicketMessage> findByTicketIdOrderByCreatedAtAsc(String ticketId);
+    void deleteByTicketId(String ticketId);
 }

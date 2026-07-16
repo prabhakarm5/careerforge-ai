@@ -25,12 +25,12 @@ public class RedisChatMemoryCacheServiceImpl implements RedisChatMemoryCacheServ
     private static final String MEMORY_PREFIX = "chat_memory:";
 
     /*
-     * Sirf last 100 hi rakhne hain (ChatServiceImpl.MAX_MEMORY_MESSAGES
+     * Sirf last 160 hi rakhne hain (ChatServiceImpl.MAX_MEMORY_MESSAGES
      * se match karta hai) â€” isse Redis list KABHI unbounded nahi
      * badhegi. Bill hamesha predictable rahega chahe conversation
      * mein 5 message ho ya 5000.
      */
-    private static final int MAX_MEMORY = 100;
+    private static final int MAX_MEMORY = 160;
 
     /*
      * Inactive conversation ki memory 2 ghante mein khud saaf ho

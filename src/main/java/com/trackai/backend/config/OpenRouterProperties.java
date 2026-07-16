@@ -100,6 +100,22 @@ public class OpenRouterProperties {
         return false;
     }
 
+    public ModelInfo findChatModel(String requestedId) {
+        if (requestedId == null || requestedId.isBlank() || "openrouter".equalsIgnoreCase(requestedId)) {
+            requestedId = chatModel;
+        }
+        String normalized = stripPrefix(requestedId);
+        if (chatModels == null) {
+            return null;
+        }
+        for (ModelInfo model : chatModels) {
+            if (Objects.equals(model.getId(), normalized)) {
+                return model;
+            }
+        }
+        return null;
+    }
+
     private String stripPrefix(String modelId) {
         if (modelId != null && modelId.startsWith("openrouter:")) {
             return modelId.substring("openrouter:".length());
@@ -116,6 +132,8 @@ public class OpenRouterProperties {
         private boolean vision;
         private String provider = "OPENROUTER";
         private String type = "chat";
+        private boolean premium;
+        private long minimumCredits;
         // FIX (dynamic max_tokens): model ka total context window (tokens
         // mein), taaki OpenRouterChatServiceImpl ye calculate kar sake ki
         // input + output milake kitna room available hai. application.yml

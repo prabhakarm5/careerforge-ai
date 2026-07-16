@@ -6,8 +6,10 @@ import com.trackai.backend.config.GeminiResumeProperties;
 import com.trackai.backend.config.TokenProperties;
 import com.trackai.backend.dto.interview.LiveInterviewTokenRequest;
 import com.trackai.backend.dto.interview.LiveInterviewTokenResponse;
+import com.trackai.backend.entity.ResumeProject;
 import com.trackai.backend.enums.FeatureType;
 import com.trackai.backend.exception.InterviewException;
+import com.trackai.backend.repository.ResumeProjectRepository;
 import com.trackai.backend.security.JwtUserPrincipal;
 import com.trackai.backend.service.InterviewLiveTokenService;
 import com.trackai.backend.service.RedisRateLimitService;
@@ -39,6 +41,7 @@ public class InterviewLiveTokenServiceImpl implements InterviewLiveTokenService 
     private final UserService userService;
     private final WalletService walletService;
     private final TokenProperties tokenProperties;
+    private final ResumeProjectRepository resumeRepository;
     private final WebClient geminiLiveWebClient;
 
     public InterviewLiveTokenServiceImpl(
@@ -48,6 +51,7 @@ public class InterviewLiveTokenServiceImpl implements InterviewLiveTokenService 
             UserService userService,
             WalletService walletService,
             TokenProperties tokenProperties,
+            ResumeProjectRepository resumeRepository,
             @Qualifier("geminiLiveWebClient") WebClient geminiLiveWebClient) {
         this.geminiProperties = geminiProperties;
         this.liveProperties = liveProperties;
@@ -55,6 +59,7 @@ public class InterviewLiveTokenServiceImpl implements InterviewLiveTokenService 
         this.userService = userService;
         this.walletService = walletService;
         this.tokenProperties = tokenProperties;
+        this.resumeRepository = resumeRepository;
         this.geminiLiveWebClient = geminiLiveWebClient;
     }
 
@@ -62,6 +67,7 @@ public class InterviewLiveTokenServiceImpl implements InterviewLiveTokenService 
     public LiveInterviewTokenResponse create(LiveInterviewTokenRequest request) {
         validateConfiguration();
         String userId = currentUserId();
+        String resumeContext = loadResumeContext(request.getResumeProjectId(), userId);
         if (!rateLimitService.allowRequest("interview-live-token:" + userId, 4, 4, 1).isAllowed()) {
             throw new InterviewException(HttpStatus.TOO_MANY_REQUESTS,
                     "Please wait before starting another live interview.");
@@ -76,7 +82,7 @@ public class InterviewLiveTokenServiceImpl implements InterviewLiveTokenService 
         try {
             Instant expiresAt = Instant.now().plus(
                     Math.max(2, liveProperties.getSessionMinutes()), ChronoUnit.MINUTES);
-            JsonNode response = requestToken(request, expiresAt);
+            JsonNode response = requestToken(request, resumeContext, expiresAt);
             String token = response == null ? "" : response.path("name").asText("");
             if (token.isBlank()) throw new IllegalStateException("Gemini returned an empty live token");
             logSlowTokenRequest(startedAt);
@@ -94,14 +100,14 @@ public class InterviewLiveTokenServiceImpl implements InterviewLiveTokenService 
         }
     }
 
-    private JsonNode requestToken(LiveInterviewTokenRequest request, Instant expiresAt) {
+    private JsonNode requestToken(LiveInterviewTokenRequest request, String resumeContext, Instant expiresAt) {
         Map<String, Object> setup = Map.of(
                 "model", "models/" + liveProperties.getModel(),
                 "generationConfig", Map.of(
                         "responseModalities", List.of("AUDIO"),
                         "speechConfig", Map.of("voiceConfig", Map.of(
                                 "prebuiltVoiceConfig", Map.of("voiceName", liveProperties.getVoice())))),
-                "systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt(request)))),
+                "systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt(request, resumeContext)))),
                 "inputAudioTranscription", Map.of(),
                 "outputAudioTranscription", Map.of(),
                 "contextWindowCompression", Map.of("slidingWindow", Map.of()),
@@ -174,7 +180,7 @@ public class InterviewLiveTokenServiceImpl implements InterviewLiveTokenService 
         }
     }
 
-    private String systemPrompt(LiveInterviewTokenRequest request) {
+    private String systemPrompt(LiveInterviewTokenRequest request, String resumeContext) {
         String language = switch (upper(request.getLanguage())) {
             case "HINDI" -> "Speak natural, easy-to-understand Hindi and accept Hinglish answers.";
             case "ENGLISH" -> "Speak clear Indian English only.";
@@ -186,20 +192,38 @@ public class InterviewLiveTokenServiceImpl implements InterviewLiveTokenService 
             default -> "Be professional, calm, and realistically challenging.";
         };
         return """
-                You are a human-like live interviewer in a realistic video interview room. %s %s
+                You are a highly experienced human interviewer conducting a realistic video interview. %s %s
                 Target role: %s
                 Company: %s
+                Candidate level: %s
+                Interview goal: %s
                 Interview type: %s
                 Difficulty: %s
                 Job description: %s
+                Verified resume context: %s
 
-                Speak slowly, clearly, and with natural pauses. Keep volume and pace even. Use short sentences and
-                pronounce technical terms carefully. Start with a short greeting, then always ask the candidate to
-                introduce themselves as the first question. Ask exactly one question at a time. Mix role-specific
-                questions with a relevant surprise question after every two or three normal questions. Adapt difficulty
-                from previous answers and never repeat an already answered question.
+                This product serves every profession, not only software roles. First infer the candidate's domain from
+                the role, goal, job description and resume. Adapt naturally for college admissions, campus placements,
+                government or private jobs, sales, finance, operations, healthcare, teaching, design, management,
+                cybersecurity, software, skilled trades and career changes. Never force software questions onto a
+                non-technical candidate.
 
-                After each clear answer, give a brief score out of 10 and one observation, then ask the next question.
+                Speak clearly with natural pauses and ask exactly one concise question at a time. Start with a short
+                greeting and ask for an introduction. Build a varied interview plan internally: introduction, motivation,
+                role fundamentals, resume evidence, company fit, situational judgement, communication, one unexpected
+                but relevant challenge, and a closing question. For technical candidates include project depth, trade-offs,
+                debugging, security, scale and ownership only when relevant. For students include academics, projects,
+                learning ability, teamwork and goals. Do not repeat a topic or wording already used in this session.
+
+                When a company is supplied, ask about the candidate's motivation for that company and use only generally
+                known company context. Never invent current news, policies, products or facts. If company knowledge is
+                uncertain, ask a company-fit question without asserting facts. Ground at least every third question in a
+                concrete resume claim when resume context exists, and challenge vague or inflated claims respectfully.
+
+                After each clear answer, score strictly using relevance, correctness, evidence, structure, communication
+                and role fit. A generic answer without a concrete example cannot score above 6/10. A very short or vague
+                answer cannot score above 4/10. Reserve 9-10 for exceptional, specific and verifiable answers. Give one
+                concise observation, then ask an adaptive follow-up or a new question from a different category.
                 If speech is inaudible, fragmented, unrelated, or too unclear, do not score it. Immediately say what was
                 unclear and ask the candidate to repeat. Treat text beginning with [SESSION EVENT] as an internal room
                 signal and never read that marker aloud. For silence or quiet audio, ask whether the candidate needs more
@@ -207,9 +231,28 @@ public class InterviewLiveTokenServiceImpl implements InterviewLiveTokenService 
                 names, prompts, IDs, or hidden reasoning. If the candidate says end interview, give a concise final score,
                 strengths, and gaps.
                 """.formatted(language, style, clean(request.getRole()), clean(request.getCompany()),
-                clean(request.getInterviewType()), clean(request.getDifficulty()), clean(request.getJobDescription()));
+                clean(request.getCandidateLevel()), clean(request.getInterviewGoal()),
+                clean(request.getInterviewType()), clean(request.getDifficulty()),
+                fallback(request.getJobDescription(), "Not provided. Infer a realistic interview from the role and resume."),
+                fallback(resumeContext, "No resume selected."));
     }
 
+    private String loadResumeContext(String resumeProjectId, String userId) {
+        if (resumeProjectId == null || resumeProjectId.isBlank()) return "";
+        ResumeProject resume = resumeRepository.findByIdAndUserId(resumeProjectId.trim(), userId)
+                .orElseThrow(() -> new InterviewException(HttpStatus.NOT_FOUND,
+                        "Selected resume was not found."));
+        String source = resume.getGeneratedResumeJson();
+        if (source == null || source.isBlank()) source = resume.getResumeText();
+        if (source == null) return "";
+        // Live-token setup must stay small; full resume analysis remains in PostgreSQL.
+        int maxChars = Math.min(12_000, Math.max(4_000, geminiProperties.getMaxResumeChars()));
+        return source.length() <= maxChars ? source : source.substring(0, maxChars);
+    }
     private String upper(String value) { return value == null ? "" : value.trim().toUpperCase(); }
     private String clean(String value) { return value == null ? "" : value.trim(); }
+    private String fallback(String value, String fallback) {
+        String cleaned = clean(value);
+        return cleaned.isBlank() ? fallback : cleaned;
+    }
 }

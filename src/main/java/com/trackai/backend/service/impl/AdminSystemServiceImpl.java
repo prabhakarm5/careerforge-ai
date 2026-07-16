@@ -105,6 +105,8 @@ public class AdminSystemServiceImpl implements AdminSystemService {
         add(values, "image", rateLimitProperties.getImage());
         add(values, "createOrder", rateLimitProperties.getCreateOrder());
         add(values, "verifyPayment", rateLimitProperties.getVerifyPayment());
+        add(values, "promoRead", rateLimitProperties.getPromoRead());
+        add(values, "promoAdmin", rateLimitProperties.getPromoAdmin());
         add(values, "promoClaim", rateLimitProperties.getPromoClaim());
         add(values, "support", rateLimitProperties.getSupport());
         return values;

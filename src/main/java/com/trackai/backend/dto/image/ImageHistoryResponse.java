@@ -10,19 +10,14 @@ import java.time.LocalDateTime;
 @Setter
 @Builder
 public class ImageHistoryResponse {
-
     private String id;
-
     private String prompt;
-
     private String imageUrl;
-
     private String storageUrl;
-
+    private String provider;
+    private String modelId;
+    private String status;
     private Long tokensUsed;
-
     private Boolean favorite;
-
     private LocalDateTime createdAt;
-
 }

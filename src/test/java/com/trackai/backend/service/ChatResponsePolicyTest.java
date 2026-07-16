@@ -51,4 +51,28 @@ class ChatResponsePolicyTest {
         assertThat(ChatResponsePolicy.recommendedMaxOutputTokens(messages, 8_192))
                 .isEqualTo(8_192);
     }
+
+    @Test
+    void autoStyleUsesDetailedModeForHtmlAndCodeRequests() {
+        assertThat(ChatResponsePolicy.resolveResponseStyle(
+                "auto",
+                "Create a complete single-file HTML page with CSS"))
+                .isEqualTo("detailed");
+    }
+
+    @Test
+    void autoStyleKeepsOrdinaryQuestionsConcise() {
+        assertThat(ChatResponsePolicy.resolveResponseStyle(
+                null,
+                "OAuth kya hota hai?"))
+                .isEqualTo("concise");
+    }
+
+    @Test
+    void explicitDetailedPreferenceIsRespected() {
+        assertThat(ChatResponsePolicy.resolveResponseStyle(
+                "detailed",
+                "OAuth kya hota hai?"))
+                .isEqualTo("detailed");
+    }
 }

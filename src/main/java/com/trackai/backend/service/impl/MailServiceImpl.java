@@ -29,6 +29,9 @@ public class MailServiceImpl implements MailService {
         @Value("${app.mail.from-name}")
         private String fromName;
 
+        @Value("${app.mail.reply-to:${spring.mail.username}}")
+        private String replyTo;
+
         // ── shared brand tokens ─────────────────────────────────────────────
         private static final String BRAND_GRADIENT = "linear-gradient(135deg,#7c3aed,#4f46e5)";
         private static final String SUCCESS_GRADIENT = "linear-gradient(135deg,#16a34a,#059669)";
@@ -56,9 +59,12 @@ public class MailServiceImpl implements MailService {
                                         "UTF-8");
 
                         helper.setFrom(fromEmail, fromName);
+                        helper.setReplyTo(replyTo, fromName);
                         helper.setTo(toEmail);
                         helper.setSubject(subject);
-                        helper.setText(htmlBody, true);
+                        helper.setSentDate(new java.util.Date());
+                        helper.setText(toPlainText(htmlBody), htmlBody);
+                        mimeMessage.setHeader("X-Auto-Response-Suppress", "All");
 
                         if (attachment != null) {
                                 helper.addAttachment(attachmentName,
@@ -94,7 +100,7 @@ public class MailServiceImpl implements MailService {
                                 + ";text-align:center;vertical-align:middle;\">"
                                 + "<span style=\"color:#ffffff;font-size:13px;font-weight:800;letter-spacing:0.5px;\">AI</span>"
                                 + "</td>"
-                                + "<td style=\"padding-left:10px;color:#ffffff;font-size:18px;font-weight:800;letter-spacing:-0.3px;\">TrackAI</td>"
+                                + "<td style=\"padding-left:10px;color:#ffffff;font-size:18px;font-weight:800;letter-spacing:-0.3px;\">CareerForge AI</td>"
                                 + "</tr></table>"
 
                                 // ── card ──
@@ -135,10 +141,26 @@ public class MailServiceImpl implements MailService {
                                 + "</table>"
 
                                 // ── outer footer ──
-                                + "<p style=\"margin:28px 0 0 0;color:#3f3a52;font-size:11px;letter-spacing:0.2px;\">TrackAI &middot; AI-powered workspace</p>"
+                                + "<p style=\"margin:28px 0 0 0;color:#3f3a52;font-size:11px;letter-spacing:0.2px;\">CareerForge AI &middot; AI-powered workspace</p>"
 
                                 + "</td></tr></table>"
                                 + "</body></html>";
+        }
+
+        private String toPlainText(String html) {
+                return html
+                                .replaceAll("(?is)<(style|script)[^>]*>.*?</\\1>", " ")
+                                .replaceAll("(?i)<br\\s*/?>", "\n")
+                                .replaceAll("(?i)</(p|h1|h2|tr|table)>", "\n")
+                                .replaceAll("(?s)<[^>]+>", " ")
+                                .replace("&middot;", "-")
+                                .replace("&nbsp;", " ")
+                                .replace("&amp;", "&")
+                                .replace("&lt;", "<")
+                                .replace("&gt;", ">")
+                                .replaceAll("[ \\t]+", " ")
+                                .replaceAll("\\n{3,}", "\n\n")
+                                .trim();
         }
 
         private String paragraph(String text) {
@@ -208,7 +230,7 @@ public class MailServiceImpl implements MailService {
                         long expiryMinutes) {
 
                 String body = paragraph("Hello <b style=\"color:#e2e8f0;\">" + userName + "</b>,")
-                                + paragraph("Welcome to TrackAI! Please verify your email address to activate your account and start building.")
+                                + paragraph("Welcome to CareerForge AI! Please verify your email address to activate your account and start building.")
                                 + linkButton(verificationLink, "Verify Email Address", BRAND_GRADIENT)
                                 + expiryNote(expiryMinutes);
 
@@ -219,7 +241,7 @@ public class MailServiceImpl implements MailService {
                                 "If you did not create this account, you can safely ignore this email — no action will be taken.",
                                 BRAND_GRADIENT);
 
-                send(toEmail, "Verify Your TrackAI Account", html);
+                send(toEmail, "Verify Your CareerForge AI Account", html);
         }
 
         // ── RESEND VERIFICATION EMAIL ────────────────────────────────────────
@@ -228,7 +250,7 @@ public class MailServiceImpl implements MailService {
                         long expiryMinutes) {
 
                 String body = paragraph("Hello <b style=\"color:#e2e8f0;\">" + userName + "</b>,")
-                                + paragraph("A new verification link has been generated for your TrackAI account.")
+                                + paragraph("A new verification link has been generated for your CareerForge AI account.")
                                 + linkButton(verificationLink, "Verify Email Address", BRAND_GRADIENT)
                                 + expiryNote(expiryMinutes);
 
@@ -239,7 +261,7 @@ public class MailServiceImpl implements MailService {
                                 "If you did not request this, please secure your account by changing your password.",
                                 BRAND_GRADIENT);
 
-                send(toEmail, "New Verification Link - TrackAI", html);
+                send(toEmail, "New Verification Link - CareerForge AI", html);
         }
 
         // ── FORGOT PASSWORD OTP ──────────────────────────────────────────────
@@ -247,7 +269,7 @@ public class MailServiceImpl implements MailService {
         public void sendForgotPasswordOtp(String userName, String toEmail, String otp, long expiryMinutes) {
 
                 String body = paragraph("Hello <b style=\"color:#e2e8f0;\">" + userName + "</b>,")
-                                + paragraph("We received a request to reset your TrackAI account password. Use the code below to continue:")
+                                + paragraph("We received a request to reset your CareerForge AI account password. Use the code below to continue:")
                                 + otpBlock(otp)
                                 + expiryNote(expiryMinutes);
 
@@ -258,7 +280,7 @@ public class MailServiceImpl implements MailService {
                                 "If you did not request a password reset, please ignore this email — your password will remain unchanged. Never share this code with anyone.",
                                 BRAND_GRADIENT);
 
-                send(toEmail, "TrackAI Password Reset OTP", html);
+                send(toEmail, "CareerForge AI Password Reset OTP", html);
         }
 
         // ── ADMIN LOGIN OTP ──────────────────────────────────────────────────
@@ -267,7 +289,7 @@ public class MailServiceImpl implements MailService {
         public void sendAdminLoginOtp(String userName, String toEmail, String otp, long expiryMinutes) {
 
                 String body = paragraph("Hello <b style=\"color:#e2e8f0;\">" + userName + "</b>,")
-                                + paragraph("An admin login was requested for your TrackAI account. Use the code below to continue:")
+                                + paragraph("An admin login was requested for your CareerForge AI account. Use the code below to continue:")
                                 + otpBlock(otp)
                                 + expiryNote(expiryMinutes);
 
@@ -278,7 +300,7 @@ public class MailServiceImpl implements MailService {
                                 "If you did not request this login, please secure your account immediately and contact support.",
                                 BRAND_GRADIENT);
 
-                send(toEmail, "TrackAI Admin Login OTP", html);
+                send(toEmail, "CareerForge AI Admin Login OTP", html);
         }
 
         @Async // ✅ tumhare AsyncConfig ka default executor (mail-async-*) use hoga
@@ -322,7 +344,7 @@ public class MailServiceImpl implements MailService {
                                 "Keep this invoice for your records. Contact support if you have any questions about this transaction.",
                                 SUCCESS_GRADIENT);
 
-                send(toEmail, "Payment Successful - TrackAI", html, invoicePdf, "invoice-" + txn.getOrderId() + ".pdf");
+                send(toEmail, "Payment Successful - CareerForge AI", html, invoicePdf, "invoice-" + txn.getOrderId() + ".pdf");
         }
 
         // ── PAYMENT FAILED ───────────────────────────────────────────────
@@ -366,7 +388,7 @@ public class MailServiceImpl implements MailService {
                                 "If the amount isn't refunded within the stated window, please contact support with your Order ID.",
                                 FAILED_GRADIENT);
 
-                send(toEmail, "Payment Failed - TrackAI", html, invoicePdf,
+                send(toEmail, "Payment Failed - CareerForge AI", html, invoicePdf,
                                 "payment-failed-" + txn.getOrderId() + ".pdf");
         }
 

@@ -69,6 +69,10 @@ public record AdminMonitoringResponse(
             String user,
             String clientIp,
             String location,
-            String userAgent) {
+            String userAgent,
+            String userEmail,
+            String responseSummary,
+            String contentType,
+            long responseBytes) {
     }
 }

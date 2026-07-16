@@ -17,7 +17,6 @@ public class StartInterviewRequest {
     @Size(max = 140)
     private String company;
 
-    @NotBlank(message = "Job description is required")
     @Size(max = 20_000)
     private String jobDescription;
 

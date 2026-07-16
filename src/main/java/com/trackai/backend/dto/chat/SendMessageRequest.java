@@ -24,6 +24,6 @@ public class SendMessageRequest {
     // model has vision: true in application.yml. Ignored otherwise.
     private String image;
 
-    // Optional user preference: concise (default) or balanced.
+    // Optional user preference: auto (default), concise, balanced, or detailed.
     private String responseStyle;
 }

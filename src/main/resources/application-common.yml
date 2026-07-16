@@ -57,7 +57,8 @@ app:
   # MAIL SETTINGS
   # ---------------------------------------
   mail:
-    from-name: TrackAI Security Team
+    from-name: ${MAIL_FROM_NAME:CareerForge AI}
+    reply-to: ${MAIL_REPLY_TO:${MAIL_USERNAME}}
     verification-expiry-minutes: 15
     resend-wait-minutes: 1
 
@@ -203,6 +204,14 @@ app:
       refill-minutes: 1
 
     # --- Claims and external discovery ---
+    promo-read:
+      capacity: ${PROMO_READ_RATE_CAPACITY:60}
+      refill-tokens: ${PROMO_READ_RATE_REFILL_TOKENS:60}
+      refill-minutes: ${PROMO_READ_RATE_REFILL_MINUTES:1}
+    promo-admin:
+      capacity: ${PROMO_ADMIN_RATE_CAPACITY:20}
+      refill-tokens: ${PROMO_ADMIN_RATE_REFILL_TOKENS:20}
+      refill-minutes: ${PROMO_ADMIN_RATE_REFILL_MINUTES:1}
     promo-claim:
       capacity: 5
       refill-tokens: 5
@@ -332,32 +341,18 @@ groq:
   models:
     - id: llama-3.3-70b-versatile
       label: "Llama 3.3 70B"
-      description: "Balanced model for general chat, coding help, and long-form answers"
+      description: "Balanced general chat, coding, and document help."
       vision: false
+      premium: false
+      minimum-credits: 0
+      context-length: 131072
     - id: llama-3.1-8b-instant
-      label: "Llama 3.1 8B (Fast)"
-      description: "Fast model for short questions and quick replies"
+      label: "Llama 3.1 8B Fast"
+      description: "Low-latency model for short questions and quick replies."
       vision: false
-    - id: llama-3.2-90b-vision-preview
-      label: "Llama 3.2 90B Vision"
-      description: "Vision model for understanding photos, screenshots, and diagrams"
-      vision: true
-    - id: llama-3.2-11b-vision-preview
-      label: "Llama 3.2 11B Vision (Fast)"
-      description: "Fast vision model for lightweight image understanding tasks"
-      vision: true
-    - id: deepseek-r1-distill-llama-70b
-      label: "DeepSeek R1 Distill 70B"
-      description: "Deep reasoning model for step-by-step problem solving"
-      vision: false
-    - id: openai/gpt-oss-20b
-      label: "GPT-OSS 20B"
-      description: "Open-weight model for balanced general use"
-      vision: false
-    - id: openai/gpt-oss-120b
-      label: "GPT-OSS 120B"
-      description: "Larger open-weight model for more demanding tasks"
-      vision: false
+      premium: false
+      minimum-credits: 0
+      context-length: 131072
 
 # =========================================
 # OPENROUTER Ã¢â‚¬â€ Chat and Image Models
@@ -366,38 +361,96 @@ openrouter:
   api-key: ${OPENROUTER_API_KEY}
   base-url: https://openrouter.ai/api/v1
   chat-endpoint: /chat/completions
-  chat-model: nvidia/nemotron-3-ultra-550b-a55b:free
+  chat-model: openrouter/free
   chat-models:
+    - id: openrouter/free
+      label: "Free Smart Router"
+      description: "Automatically selects an available free model for everyday chat."
+      vision: false
+      type: chat
+      premium: false
+      minimum-credits: 0
+      context-length: 131072
+    - id: tencent/hy3:free
+      label: "tencent/hy3"
+      description: "Automatically selects an available free model for everyday chat."
+      vision: false
+      type: chat
+      premium: false
+      minimum-credits: 0
+      context-length: 131072
+    - id: nvidia/nemotron-3-ultra-550b-a55b
+      label: "Nemotron 3 Ultra"
+      description: "NVIDIA long-context reasoning model for coding and complex agentic tasks."
+      vision: false
+      type: chat
+      premium: true
+      minimum-credits: 1
+      context-length: 1000000
     - id: nvidia/nemotron-3-ultra-550b-a55b:free
-      label: "OpenRouter - Nemotron 3 Ultra"
-      description: "Free reasoning-focused text model for general chat and long-form answers."
+      label: "nvidia/nemotron-3-ultra-550b-a55b"
+      description: "Automatically selects an available free model for everyday chat."
       vision: false
       type: chat
-    - id: cohere/north-mini-code:free
-      label: "OpenRouter - North Mini Code"
-      description: "Free coding-focused text model for programming, debugging, and technical help."
+      premium: false
+      minimum-credits: 0
+      context-length: 131072
+    - id: z-ai/glm-4.5-air:free
+      label: "GLM 4.5 Air"
+      description: "Free lightweight GLM model for fast reasoning, coding, and follow-up chat."
       vision: false
       type: chat
-    - id: nvidia/nemotron-3.5-content-safety:free
-      label: "OpenRouter - Nemotron Content Safety"
-      description: "Free safety and moderation-oriented text/vision model for testing guardrail flows."
-      vision: true
-      type: chat
+      premium: false
+      minimum-credits: 0
+      context-length: 131072
     - id: z-ai/glm-5.2
-      label: "OpenRouter - GLM 5.2"
-      description: "Long-context reasoning model for complex planning, coding, and agent-style tasks."
+      label: "GLM 5.2"
+      description: "Long-context engineering and multi-step reasoning model."
       vision: false
       type: chat
-    - id: moonshotai/kimi-k2.7-code
-      label: "OpenRouter - Kimi K2.7 Code"
-      description: "Coding-focused model for end-to-end software tasks and repository-level help."
+      premium: true
+      minimum-credits: 1
+      context-length: 1048576
+    - id: google/gemini-2.5-flash-lite
+      label: "Gemini 2.5 Flash Lite"
+      description: "Fast multimodal model for responsive chat and lightweight reasoning."
       vision: true
       type: chat
-    - id: google/gemma-4-31b-it:free
-      label: "OpenRouter - Gemma 4 31B IT"
-      description: "Multi-model router that can deliberate across models for broad research-style prompts."
+      premium: true
+      minimum-credits: 1
+      context-length: 1048576
+    - id: google/gemini-2.5-flash
+      label: "Gemini 2.5 Flash"
+      description: "Balanced multimodal reasoning for coding, documents, and visual questions."
       vision: true
       type: chat
+      premium: true
+      minimum-credits: 1
+      context-length: 1048576
+    - id: openai/gpt-5.6-luna
+      label: "GPT-5.6 Luna"
+      description: "Fast GPT-5.6 model for high-quality, latency-sensitive work."
+      vision: false
+      type: chat
+      premium: true
+      minimum-credits: 1
+      context-length: 1048576
+    - id: "~anthropic/claude-sonnet-latest"
+      label: "Claude Sonnet Latest"
+      description: "Latest Sonnet model for strong writing, analysis, and coding."
+      vision: true
+      type: chat
+      premium: true
+      minimum-credits: 1
+      context-length: 1000000
+    - id: anthropic/claude-fable-5
+      label: "Claude Fable 5"
+      description: "Mythos-class model for long-running, complex knowledge and coding tasks."
+      vision: true
+      type: chat
+      premium: true
+      minimum-credits: 1
+      context-length: 1000000
   image-endpoint: /images
   image-model: google/gemini-3.1-flash-lite-image
   image-models:
@@ -420,6 +473,59 @@ openrouter:
   referer: ${FRONTEND_URL}
   title: TrackAI
 
+# =========================================
+# HUGGING FACE IMAGE GENERATION
+# Free accounts receive limited credits; keep the token in environment only.
+# =========================================
+huggingface:
+  image:
+    enabled: ${HF_IMAGE_ENABLED:true}
+    api-key: ${HF_TOKEN:}
+    base-url: ${HF_IMAGE_BASE_URL:https://router.huggingface.co/fal-ai}
+    # Legacy single-model values remain as a safe fallback for older deployments.
+    model: ${HF_IMAGE_MODEL:black-forest-labs/FLUX.1-schnell}
+    provider-model: ${HF_IMAGE_PROVIDER_MODEL:fal-ai/flux/schnell}
+    label: ${HF_IMAGE_LABEL:FLUX.1 Schnell}
+    description: ${HF_IMAGE_DESCRIPTION:Fast text-to-image generation through Hugging Face Inference Providers and Fal AI.}
+    timeout-seconds: ${HF_IMAGE_TIMEOUT_SECONDS:120}
+    poll-interval-millis: ${HF_IMAGE_POLL_INTERVAL_MS:500}
+    max-download-bytes: ${HF_IMAGE_MAX_DOWNLOAD_BYTES:15728640}
+    max-upload-bytes: ${HF_IMAGE_MAX_UPLOAD_BYTES:8388608}
+    models:
+      - id: ${HF_IMAGE_MODEL_FLUX_SCHNELL:black-forest-labs/FLUX.1-schnell}
+        provider-model: ${HF_IMAGE_PROVIDER_FLUX_SCHNELL:fal-ai/flux/schnell}
+        label: "FLUX.1 Schnell"
+        description: "Fast, clean generation for everyday prompts and concept art."
+        inference-steps: 4
+        default-model: true
+        supports-image-input: false
+      - id: ${HF_IMAGE_MODEL_Z_IMAGE_TURBO:Tongyi-MAI/Z-Image-Turbo}
+        provider-model: ${HF_IMAGE_PROVIDER_Z_IMAGE_TURBO:fal-ai/z-image/turbo}
+        label: "Z-Image Turbo"
+        description: "Fast photorealistic generation with strong prompt adherence."
+        inference-steps: 8
+        supports-image-input: false
+      - id: ${HF_IMAGE_MODEL_SDXL:stabilityai/stable-diffusion-xl-base-1.0}
+        provider-model: ${HF_IMAGE_PROVIDER_SDXL:fal-ai/fast-sdxl}
+        label: "Stable Diffusion XL"
+        description: "Versatile open image model for illustrations, products, and stylized visuals."
+        inference-steps: 25
+        supports-image-input: false
+      - id: ${HF_IMAGE_MODEL_KREA_TURBO:krea/Krea-2-Turbo}
+        provider-model: ${HF_IMAGE_PROVIDER_KREA_TURBO:fal-ai/krea-2/turbo}
+        label: "Krea 2 Turbo"
+        description: "Fast high-detail generation for polished creative assets."
+        inference-steps: 8
+        supports-image-input: false
+
+      - id: ${HF_IMAGE_MODEL_FLUX_KONTEXT:black-forest-labs/FLUX.1-Kontext-dev}
+        provider-model: ${HF_IMAGE_PROVIDER_FLUX_KONTEXT:fal-ai/flux-kontext/dev}
+        label: "FLUX.1 Kontext Edit"
+        description: "Edit, restyle, or transform an uploaded image with a natural-language prompt."
+        inference-steps: 28
+        supports-image-input: true
+        requires-image-input: true
+        image-input-field: image_url
 # =========================================
 # GEMINI RESUME AI
 # Add GEMINI_API_KEY only in environment/secrets; never commit the key.

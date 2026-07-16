@@ -17,4 +17,5 @@ public interface SupportTicketService {
     SupportTicketResponse getAsAdmin(String ticketId);
     SupportTicketResponse replyAsAdmin(String ticketId, SupportReplyRequest request);
     SupportTicketResponse updateStatusAsAdmin(String ticketId, SupportStatusRequest request);
+    void deleteAsAdmin(String ticketId);
 }

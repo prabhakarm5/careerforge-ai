@@ -53,7 +53,7 @@ public class InterviewServiceImpl implements InterviewService {
 
         try {
             JsonNode generated = geminiClient.generateInterviewQuestion(
-                    resumeContext(resume), request.getJobDescription().trim(), request.getRole().trim(),
+                    resumeContext(resume), normalize(request.getJobDescription()), request.getRole().trim(),
                     normalize(request.getCompany()), request.getType().name(), request.getDifficulty().name(),
                     "", 1, model);
             InterviewSession session = InterviewSession.builder()
@@ -61,7 +61,7 @@ public class InterviewServiceImpl implements InterviewService {
                     .resumeProjectId(resume == null ? null : resume.getId())
                     .role(request.getRole().trim())
                     .company(normalize(request.getCompany()))
-                    .jobDescription(request.getJobDescription().trim())
+                    .jobDescription(normalize(request.getJobDescription()))
                     .type(request.getType())
                     .difficulty(request.getDifficulty())
                     .status(InterviewStatus.IN_PROGRESS)
@@ -99,7 +99,7 @@ public class InterviewServiceImpl implements InterviewService {
                     resumeContext(resume), session.getJobDescription(), session.getRole(), session.getCompany(),
                     session.getType().name(), session.getDifficulty().name(), transcript(previous),
                     session.getCurrentQuestion(), request.getAnswer().trim(), finalAnswer, session.getModelId());
-            int score = Math.max(0, Math.min(100, evaluation.path("score").asInt(0)));
+            int score = calculateStrictScore(evaluation, request.getAnswer());
             InterviewTurn turn = InterviewTurn.builder()
                     .sessionId(session.getId())
                     .questionNumber(session.getCurrentQuestionNumber())
@@ -236,13 +236,13 @@ public class InterviewServiceImpl implements InterviewService {
     }
 
     private void consume(String userId, long cost, String description) {
-        if (cost > 0) walletService.consumeTokens(userId, cost, FeatureType.CHAT, description);
+        if (cost > 0) walletService.consumeTokens(userId, cost, FeatureType.INTERVIEW, description);
     }
 
     private void refund(String userId, long cost, String description) {
         if (cost <= 0) return;
         try {
-            walletService.addTokens(userId, cost, FeatureType.CHAT, description);
+            walletService.addTokens(userId, cost, FeatureType.INTERVIEW, description);
         } catch (Exception error) {
             log.error("Interview credit refund failed for user {}", userId, error);
         }
@@ -255,6 +255,34 @@ public class InterviewServiceImpl implements InterviewService {
     private String requiredText(JsonNode node, String field, String fallback) {
         String value = node.path(field).asText("").trim();
         return value.isBlank() ? fallback : value;
+    }
+
+    private int calculateStrictScore(JsonNode evaluation, String answer) {
+        JsonNode rubric = evaluation.path("rubric");
+        int score;
+        if (rubric.isObject()) {
+            int relevance = rubricScore(rubric, "relevance");
+            int correctness = rubricScore(rubric, "correctness");
+            int evidence = rubricScore(rubric, "evidence");
+            int structure = rubricScore(rubric, "structure");
+            int communication = rubricScore(rubric, "communication");
+            int roleFit = rubricScore(rubric, "roleFit");
+            score = Math.round((relevance * 0.20f + correctness * 0.20f + evidence * 0.20f
+                    + structure * 0.15f + communication * 0.10f + roleFit * 0.15f) * 10f);
+        } else {
+            score = evaluation.path("score").asInt(0);
+        }
+
+        String normalizedAnswer = answer == null ? "" : answer.trim();
+        int wordCount = normalizedAnswer.isBlank() ? 0 : normalizedAnswer.split("\\s+").length;
+        if (wordCount < 8) score = Math.min(score, 25);
+        else if (wordCount < 20) score = Math.min(score, 45);
+        else if (wordCount < 40) score = Math.min(score, 65);
+        return Math.max(0, Math.min(100, score));
+    }
+
+    private int rubricScore(JsonNode rubric, String field) {
+        return Math.max(0, Math.min(10, rubric.path(field).asInt(0)));
     }
 
     private String writeStrings(JsonNode node) {

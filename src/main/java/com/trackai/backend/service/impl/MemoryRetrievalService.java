@@ -29,9 +29,9 @@ public class MemoryRetrievalService {
 
     private final ChatMessageRepository chatMessageRepository;
 
-    private static final int SCAN_WINDOW = 300;
-    private static final int MAX_SNIPPETS = 6;
-    private static final int SNIPPET_MAX_CHARS = 420;
+    private static final int SCAN_WINDOW = 600;
+    private static final int MAX_SNIPPETS = 10;
+    private static final int SNIPPET_MAX_CHARS = 700;
     private static final double MIN_SIMILARITY = 0.10;
 
     private static final Pattern RECALL_PATTERN_EN = Pattern.compile(
@@ -43,7 +43,7 @@ public class MemoryRetrievalService {
             "(?i)(yaad|pehle|purana|purani|bataya tha|kaha tha|kahaa tha|humne baat ki thi|"
                     + "hum log|hmlog|hamlog|kya baat kiye|maine bola tha|maine kaha tha|pichhla|"
                     + "pichla|pichhli baar|wo jo maine|jo maine bataya|ussi ko|usi ko|wahi wala|"
-                    + "same wala|continue karo|aage karo)");
+                    + "same wala|continue karo|aage karo|bhool|bhul|yaad nahi|yaad nhii)");
 
     private static final Set<String> STOPWORDS = Set.of(
             "what", "when", "where", "which", "about", "there", "their", "would", "could",

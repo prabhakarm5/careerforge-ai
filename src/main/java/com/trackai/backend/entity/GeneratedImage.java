@@ -56,6 +56,8 @@ public class GeneratedImage {
     @Column(nullable = false)
     private String provider;
 
+    private String modelId;
+
     @Column(nullable = false)
     private Long tokensUsed;
 

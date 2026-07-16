@@ -70,6 +70,8 @@ public class RateLimitProperties {
     private Limit websiteGenerator = new Limit();
 
     // Promo claims and external job searches are security-sensitive.
+    private Limit promoRead = new Limit();
+    private Limit promoAdmin = new Limit();
     private Limit promoClaim = new Limit();
     private Limit jobSearch = new Limit();
 

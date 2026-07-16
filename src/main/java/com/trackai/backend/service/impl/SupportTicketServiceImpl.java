@@ -5,6 +5,7 @@ import com.trackai.backend.dto.RateLimitResponse;
 import com.trackai.backend.dto.support.*;
 import com.trackai.backend.entity.SupportTicket;
 import com.trackai.backend.entity.SupportTicketMessage;
+import com.trackai.backend.entity.User;
 import com.trackai.backend.enums.Role;
 import com.trackai.backend.enums.SupportTicketPriority;
 import com.trackai.backend.enums.SupportTicketStatus;
@@ -23,6 +24,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.UUID;
 
 @Service
@@ -67,8 +71,10 @@ public class SupportTicketServiceImpl implements SupportTicketService {
 
     @Override
     public List<SupportTicketSummaryResponse> getMine() {
-        return ticketRepository.findTop100ByUserIdOrderByUpdatedAtDesc(currentUser().id())
-                .stream().map(this::summary).toList();
+        UserContext current = currentUser();
+        User account = userRepository.findById(current.id()).orElse(null);
+        return ticketRepository.findTop100ByUserIdOrderByUpdatedAtDesc(current.id())
+                .stream().map(ticket -> summary(ticket, account)).toList();
     }
 
     @Override
@@ -121,7 +127,10 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         List<SupportTicket> tickets = status == null
                 ? ticketRepository.findTop100ByOrderByUpdatedAtDesc()
                 : ticketRepository.findTop100ByStatusOrderByUpdatedAtDesc(status);
-        return tickets.stream().map(this::summary).toList();
+        Map<String, User> users = userRepository.findAllById(
+                        tickets.stream().map(SupportTicket::getUserId).distinct().toList())
+                .stream().collect(Collectors.toMap(User::getId, Function.identity()));
+        return tickets.stream().map(ticket -> summary(ticket, users.get(ticket.getUserId()))).toList();
     }
 
     @Override
@@ -152,6 +161,14 @@ public class SupportTicketServiceImpl implements SupportTicketService {
                         ? LocalDateTime.now() : null);
         touch(ticket);
         return detail(ticket);
+    }
+
+    @Override
+    @Transactional
+    public void deleteAsAdmin(String ticketId) {
+        SupportTicket ticket = required(ticketId);
+        messageRepository.deleteByTicketId(ticket.getId());
+        ticketRepository.delete(ticket);
     }
 
     private void saveMessage(String ticketId, UserContext sender, String rawMessage) {
@@ -188,13 +205,16 @@ public class SupportTicketServiceImpl implements SupportTicketService {
                         message.getId(), message.getSenderId(), message.getSenderRole(),
                         message.getMessage(), message.getCreatedAt()))
                 .toList();
-        return new SupportTicketResponse(summary(ticket), messages);
+        User account = userRepository.findById(ticket.getUserId()).orElse(null);
+        return new SupportTicketResponse(summary(ticket, account), messages);
     }
 
-    private SupportTicketSummaryResponse summary(SupportTicket ticket) {
+    private SupportTicketSummaryResponse summary(SupportTicket ticket, User account) {
         return new SupportTicketSummaryResponse(
-                ticket.getId(), ticket.getUserId(), ticket.getSubject(),
-                ticket.getCategory(), ticket.getPriority(), ticket.getStatus(),
+                ticket.getId(), ticket.getUserId(),
+                account == null ? "Deleted user" : account.getName(),
+                account == null ? null : account.getEmail(),
+                ticket.getSubject(), ticket.getCategory(), ticket.getPriority(), ticket.getStatus(),
                 ticket.getOrderId(), ticket.getCreatedAt(), ticket.getUpdatedAt(),
                 ticket.getResolvedAt());
     }

@@ -83,7 +83,7 @@ public class ChatServiceImpl implements ChatService {
         private static final Duration STREAM_TIMEOUT = Duration.ofMinutes(10);
         private static final long SSE_TIMEOUT_MS = STREAM_TIMEOUT.toMillis();
 
-        private static final int MAX_MEMORY_MESSAGES = 100;
+        private static final int MAX_MEMORY_MESSAGES = 160;
 
         private static final String EVENT_PING = "ping";
 
@@ -496,13 +496,22 @@ public class ChatServiceImpl implements ChatService {
                         List<GroqMessage> memory,
                         String responseStyle,
                         String latestUserMessage) {
-                String style = responseStyle == null ? "concise" : responseStyle.trim().toLowerCase();
-                String instruction = "The latest user message is the active request and overrides older tasks. "
+                String style = ChatResponsePolicy.resolveResponseStyle(responseStyle, latestUserMessage);
+                String lengthInstruction = switch (style) {
+                        case "detailed" -> "Give the complete answer with all necessary implementation detail. "
+                                        + "For code, pages, files, or documents, do not shorten required sections and do not stop mid-block.";
+                        case "balanced" -> "Answer clearly with useful detail and examples where helpful, without repetition.";
+                        default -> "Be concise for ordinary questions, but still fully satisfy every explicit format and length requirement.";
+                };
+                String instruction = "Treat the supplied earlier messages as durable conversation memory. "
+                                + "Resolve pronouns and follow-up requests from that context, and never claim to have forgotten context that is present. "
+                                + "The latest user message is the active request and overrides older tasks. "
                                 + "Do not repeat or continue an earlier answer unless the latest message asks for it. "
-                                + ("balanced".equals(style)
-                                                ? "Answer clearly with useful detail, without repetition."
-                                                : "Be concise by default: use 1-4 short sentences and stay under 120 words "
-                                                                + "unless the latest message explicitly requests substantial code or a detailed document.")
+                                + "Put every code sample inside a fenced Markdown code block with its language so the client can render copy, download, and artifact controls. "
+                                + "The client already provides artifact preview, copy, and download controls. Never output CodePen, StackBlitz, or JSFiddle links, raw HTML anchor tags, Blob URLs, data:text/html URLs, or a separate preview-links section. "
+                                + "Do not emit decorative Markdown horizontal rules such as --- or -----. "
+                                + "Use a few tasteful emojis only when the user asks for a colorful or creative presentation. "
+                                + lengthInstruction
                                 + " Follow any exact language, format, or length constraint in the latest message.";
                 if (ChatResponsePolicy.forcedReply(latestUserMessage).isPresent()) {
                         instruction += " Return only the exact requested acknowledgement word with no markdown or explanation.";
@@ -513,6 +522,30 @@ public class ChatServiceImpl implements ChatService {
                 if (text == null || text.isEmpty())
                         return 0;
                 return Math.max(1, text.length() / 4);
+        }
+
+        private GroqModelConfig.ModelInfo selectedModel(String requestedModel) {
+                GroqModelConfig.ModelInfo groqModel = groqModelConfig.findModel(requestedModel);
+                if (groqModel != null) return groqModel;
+                return openRouterChatService.getAvailableModels().stream()
+                                .filter(model -> model.getId().equals(requestedModel)
+                                                || ("openrouter:" + model.getId()).equals(requestedModel))
+                                .findFirst()
+                                .orElse(null);
+        }
+
+        private void enforceModelAccess(String requestedModel, Wallet wallet) {
+                GroqModelConfig.ModelInfo model = selectedModel(requestedModel);
+                if (model == null || !model.isPremium()) return;
+                long minimum = Math.max(1, model.getMinimumCredits());
+                boolean recharged = wallet.getCurrentPlanId() != null
+                                && !wallet.getCurrentPlanId().isBlank();
+                if (!recharged || wallet.getRemainingTokens() < minimum) {
+                        throw new InsufficientTokensException(
+                                        !recharged
+                                                        ? "Recharge once to unlock " + model.getLabel() + "."
+                                                        : "Add credits to continue with " + model.getLabel() + ".");
+                }
         }
 
         private String resolveModelId(String requestedModel) {
@@ -557,6 +590,12 @@ public class ChatServiceImpl implements ChatService {
                 if (!rateLimitResponse.isAllowed()) {
                         throw new RateLImitException(rateLimitResponse.getMessage());
                 }
+
+                Wallet wallet = walletService.getWalletByUserId(user.getId());
+                if (wallet.getRemainingTokens() <= 0) {
+                        throw new InsufficientTokensException("Your tokens are exhausted. Please recharge to continue.");
+                }
+                enforceModelAccess(request.getModel(), wallet);
 
                 Conversation conversation;
                 boolean isNewConversation = request.getConversationId() == null
@@ -651,6 +690,12 @@ public class ChatServiceImpl implements ChatService {
                 if (wallet.getRemainingTokens() <= 0) {
                         sendErrorAndComplete(emitter, "NO_TOKENS",
                                         "Your tokens are exhausted. Please recharge to continue.");
+                        return emitter;
+                }
+                try {
+                        enforceModelAccess(request.getModel(), wallet);
+                } catch (InsufficientTokensException exception) {
+                        sendErrorAndComplete(emitter, "MODEL_LOCKED", exception.getMessage());
                         return emitter;
                 }
 

@@ -20,6 +20,7 @@ import com.trackai.backend.repository.PromoClaimRepository;
 import com.trackai.backend.repository.PromoCodeRepository;
 import com.trackai.backend.repository.SubscriptionPlanRepository;
 import com.trackai.backend.repository.UserRepository;
+import com.trackai.backend.security.JwtUserPrincipal;
 import com.trackai.backend.service.PromoCodeService;
 import com.trackai.backend.service.PromoCodeService.PromoApplication;
 import com.trackai.backend.service.RedisRateLimitService;
@@ -51,7 +52,9 @@ public class PromoCodeServiceImpl implements PromoCodeService {
     private final RedisRateLimitService rateLimitService;
     private final RateLimitProperties rateLimits;
 
+    @Transactional(readOnly = true)
     public List<PromoCodeResponse> getAll() {
+        limit("promo-admin-read:" + actorKey(), rateLimits.getPromoRead());
         Map<String, Long> counts = claimCounts();
         return repository.findAllByOrderByCreatedAtDesc().stream()
                 .map(this::defaults)
@@ -59,8 +62,10 @@ public class PromoCodeServiceImpl implements PromoCodeService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public List<PromoCodeResponse> getAvailable() {
         User user = authenticatedUser();
+        limit("promo-read:" + user.getId(), rateLimits.getPromoRead());
         Map<String, PromoClaim> claims = claimRepository.findByUserId(user.getId()).stream()
                 .collect(Collectors.toMap(PromoClaim::getPromoCodeId, Function.identity()));
         Map<String, Long> counts = claimCounts();
@@ -189,6 +194,7 @@ public class PromoCodeServiceImpl implements PromoCodeService {
 
     @Transactional
     public PromoCodeResponse create(PromoCodeRequest request) {
+        limit("promo-admin-write:" + actorKey(), rateLimits.getPromoAdmin());
         validateRequest(request);
         String code = normalize(request.code());
         repository.findByCodeIgnoreCase(code).ifPresent(existing -> {
@@ -201,6 +207,7 @@ public class PromoCodeServiceImpl implements PromoCodeService {
 
     @Transactional
     public PromoCodeResponse update(String id, PromoCodeRequest request) {
+        limit("promo-admin-write:" + actorKey(), rateLimits.getPromoAdmin());
         validateRequest(request);
         PromoCode promo = repository.findById(id)
                 .orElseThrow(() -> error(HttpStatus.NOT_FOUND, "Promo code not found"));
@@ -213,9 +220,14 @@ public class PromoCodeServiceImpl implements PromoCodeService {
 
     @Transactional
     public void delete(String id) {
-        if (!repository.existsById(id)) throw error(HttpStatus.NOT_FOUND, "Promo code not found");
+        limit("promo-admin-write:" + actorKey(), rateLimits.getPromoAdmin());
+        PromoCode promo = repository.findById(id)
+                .orElseThrow(() -> error(HttpStatus.NOT_FOUND, "Promo code not found"));
         if (claimRepository.countByPromoCodeId(id) > 0) {
-            throw error(HttpStatus.CONFLICT, "Disable this campaign instead; it already has claims");
+            // Claimed campaigns remain as an audit record, but disappear from user eligibility immediately.
+            promo.setActive(false);
+            repository.save(promo);
+            return;
         }
         repository.deleteById(id);
     }
@@ -332,6 +344,15 @@ public class PromoCodeServiceImpl implements PromoCodeService {
                 .orElseThrow(() -> error(HttpStatus.UNAUTHORIZED, "User account was not found"));
     }
 
+    private String actorKey() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getPrincipal() instanceof JwtUserPrincipal principal
+                && principal.userId() != null && !principal.userId().isBlank()) {
+            return principal.userId();
+        }
+        String name = authentication == null ? "anonymous" : String.valueOf(authentication.getName());
+        return Integer.toUnsignedString(name.toLowerCase(Locale.ROOT).hashCode());
+    }
     private void limit(String key, RateLimitProperties.Limit limit) {
         RateLimitResponse result = rateLimitService.allowRequest(
                 key, limit.getCapacity(), limit.getRefillTokens(), limit.getRefillMinutes());

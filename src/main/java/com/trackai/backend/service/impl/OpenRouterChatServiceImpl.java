@@ -45,17 +45,20 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
             Treat the latest user message as the active instruction. Its requested language, format, and length
             override earlier tasks in the conversation. Never continue or regenerate an earlier artifact unless
             the latest message explicitly asks you to.
-            Match the latest user's language. Keep replies concise by default: usually 1-4 sentences and under
-            120 words. Use headings, lists, tables, or code blocks only when they genuinely improve the requested
-            answer. When a short follow-up is ambiguous, ask one short context-aware question instead of inventing
-            a new task or dumping code. If the user requests an exact reply such as "only say yes", output exactly
-            that reply and nothing else.
+            Match the latest user's language. Adapt the answer length to the actual request and the supplied
+            response-style instruction. Ordinary questions can be concise, while code, pages, files, documents,
+            and detailed explanations must include every necessary section.
+            Use headings, lists, tables, or code blocks only when they improve the requested answer. When a short
+            follow-up is ambiguous, ask one short context-aware question instead of inventing a new task. If the
+            user requests an exact reply such as "only say yes", output exactly that reply and nothing else.
             For explicit code or document requests, provide a complete result without giant data URLs, raw download
-            anchors, mojibake text, or claims of web search that did not happen.
+            anchors, mojibake text, invented web-search claims, answer-budget notices, or continuation instructions.
+            The client already provides artifact preview, copy, and download controls. Never output CodePen,
+            StackBlitz, or JSFiddle links, raw HTML anchor tags, Blob URLs, data:text/html URLs, or a separate
+            preview-links section.
             For a web page or single-file HTML request, put the entire source in exactly one Markdown code fence
             labelled html. Include doctype, head, body, and the closing html tag. Never emit raw HTML outside that
-            fence. If the requested page is too large for the answer budget, reduce repetition and detail so the
-            complete working file still finishes; never leave a half-written section or open tag.
+            fence and never leave a half-written property, section, code fence, or open tag.
             Never identify yourself as an underlying model. You are CareerForge AI.
             """;
 
@@ -85,20 +88,16 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
     // hai — isse kam room bacha ho to "tight" maana jaata hai.
     private static final int CONCISE_MODE_THRESHOLD_TOKENS = ABSOLUTE_MAX_TOKENS / 4;
 
-    private static final String CONCISE_MODE_INSTRUCTION_TEMPLATE = "IMPORTANT (overrides the detailed-answer "
-            + "preference above): the response budget for this reply is limited to about %d tokens right now. "
-            + "Give a noticeably SHORTER, more concise answer than you normally would — cover only the most "
-            + "important points, skip extra examples or repetition, and do not pad the answer. If real detail "
-            + "must be cut, say so briefly at the end and invite the user to ask a follow-up (or type "
-            + "\"continue\") for more.";
+    private static final String CONCISE_MODE_INSTRUCTION_TEMPLATE = "The available output room for this reply is about %d tokens. "
+            + "Prioritize the required result, remove optional repetition, and keep every code block or document structurally valid. "
+            + "Do not mention token limits, answer budgets, truncation, or ask the user to type continue.";
 
-    // Truncation par model-hop nahi karte — ek chhota polite note chipka ke
-    // turant, cleanly stream complete kar dete hain. (Ab CONCISE_MODE se
-    // zyada rare hoga, kyunki model ko pehle hi bata diya jaata hai budget
-    // tight hai — ye sirf tab trigger hoga jab model instruction ke bawajood
-    // bhi limit se zyada likhne ki koshish kare.)
-    private static final String TRUNCATION_NOTE = "\n\n---\n"
-            + "_The response reached its available answer budget. I kept the result complete and concise; ask for a specific section if you need more detail._";
+    // A provider can cap one response even when the requested artifact is valid.
+    // Continue only after finish_reason=length, using the same model and stream.
+    private static final int MAX_AUTO_CONTINUATIONS = 5;
+    private static final String CONTINUATION_PROMPT = "Continue exactly from the next character after your previous output. "
+            + "Do not repeat, summarize, restart, add a preamble, reopen an existing code fence, or mention continuation. "
+            + "Complete the full requested code or document, including every remaining closing fence and tag.";
 
     @Override
     public ChatResponse generateResponse(List<GroqMessage> messages, String modelId) {
@@ -152,19 +151,34 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
             Runnable onComplete,
             Consumer<Throwable> onError) {
 
+        String resolvedModelId = resolveModel(modelId);
+        streamSegment(messages, resolvedModelId, 0, new StringBuilder(), onChunk, onComplete, onError);
+    }
+
+    private void streamSegment(
+            List<GroqMessage> baseMessages,
+            String resolvedModelId,
+            int continuationIndex,
+            StringBuilder accumulated,
+            Consumer<String> onChunk,
+            Runnable onComplete,
+            Consumer<Throwable> onError) {
+
+        List<GroqMessage> requestMessages = continuationIndex == 0
+                ? baseMessages
+                : buildContinuationMessages(baseMessages, accumulated.toString());
         AtomicBoolean streamStarted = new AtomicBoolean(false);
         AtomicBoolean truncated = new AtomicBoolean(false);
+        int dynamicMaxTokens = computeDynamicMaxTokens(requestMessages, resolvedModelId);
 
-        String resolvedModelId = resolveModel(modelId);
-        int dynamicMaxTokens = computeDynamicMaxTokens(messages, resolvedModelId);
-
-        log.info("OpenRouter stream request — model={}, dynamicMaxTokens={}", resolvedModelId, dynamicMaxTokens);
+        log.info("OpenRouter stream request - model={}, dynamicMaxTokens={}, continuation={}",
+                resolvedModelId, dynamicMaxTokens, continuationIndex);
 
         openRouterWebClient
                 .post()
                 .uri(properties.getChatEndpoint())
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(buildRequestBody(messages, resolvedModelId, true, dynamicMaxTokens))
+                .bodyValue(buildRequestBody(requestMessages, resolvedModelId, true, dynamicMaxTokens))
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, this::mapErrorResponse)
                 .bodyToFlux(String.class)
@@ -183,20 +197,35 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
                 .subscribe(
                         rawLine -> {
                             streamStarted.set(true);
-                            if (handleLine(rawLine, onChunk)) {
+                            if (handleLine(rawLine, chunk -> {
+                                accumulated.append(chunk);
+                                onChunk.accept(chunk);
+                            })) {
                                 truncated.set(true);
                             }
                         },
                         onError,
                         () -> {
+                            if (truncated.get() && continuationIndex < MAX_AUTO_CONTINUATIONS) {
+                                log.info("OpenRouter output limit reached; continuing same stream automatically (part {})",
+                                        continuationIndex + 2);
+                                streamSegment(baseMessages, resolvedModelId, continuationIndex + 1,
+                                        accumulated, onChunk, onComplete, onError);
+                                return;
+                            }
                             if (truncated.get()) {
-                                log.warn(
-                                        "OpenRouter stream truncated at max_tokens (model={}) — finishing gracefully with note",
-                                        modelId);
-                                onChunk.accept(TRUNCATION_NOTE);
+                                log.warn("OpenRouter output remained truncated after {} automatic continuations (model={})",
+                                        MAX_AUTO_CONTINUATIONS, resolvedModelId);
                             }
                             onComplete.run();
                         });
+    }
+
+    private List<GroqMessage> buildContinuationMessages(List<GroqMessage> baseMessages, String accumulated) {
+        List<GroqMessage> continuation = new ArrayList<>(baseMessages);
+        continuation.add(new GroqMessage("assistant", accumulated));
+        continuation.add(new GroqMessage("user", CONTINUATION_PROMPT));
+        return continuation;
     }
 
     @Override
@@ -222,6 +251,8 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
             model.setProvider("OPENROUTER");
             model.setType("chat");
             model.setContextLength(item.getContextLength());
+            model.setPremium(item.isPremium());
+            model.setMinimumCredits(item.getMinimumCredits());
             models.add(model);
         }
 
@@ -532,7 +563,12 @@ public class OpenRouterChatServiceImpl implements OpenRouterChatService {
                 onChunk.accept(delta.getContent());
             }
 
-            return "length".equals(choice.getFinishReason());
+            String finishReason = choice.getFinishReason();
+            return finishReason != null && (
+                    "length".equalsIgnoreCase(finishReason)
+                            || "max_tokens".equalsIgnoreCase(finishReason)
+                            || "max_output_tokens".equalsIgnoreCase(finishReason)
+                            || "token_limit".equalsIgnoreCase(finishReason));
         } catch (Exception e) {
             log.debug("Skipping unparsable OpenRouter stream line: {}", line);
             return false;

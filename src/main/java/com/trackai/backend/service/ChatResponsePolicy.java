@@ -18,7 +18,8 @@ public final class ChatResponsePolicy {
 
     private static final Pattern DETAILED_WORK = Pattern.compile(
             "(?i)\\b(?:create|build|generate|implement|write|design|code|page|app|website|project|"
-                    + "complete|full|detailed|explain in detail|step by step|banao|bana do|code do)\\b");
+                    + "complete|full|detailed|explain in detail|step by step|banao|bana do|code do|"
+                    + "html|css|javascript|typescript|react|resume|document|file|source)\\b");
 
     private static final Pattern SHORT_REQUEST = Pattern.compile(
             "(?i)\\b(?:short|brief|concise|one line|one sentence|few words|chhota|chota|kam words)\\b");
@@ -55,6 +56,24 @@ public final class ChatResponsePolicy {
             desired = 1200;
         }
         return Math.max(16, Math.min(hardMaximum, desired));
+    }
+
+    public static boolean isDetailedWork(String message) {
+        return DETAILED_WORK.matcher(latestInstruction(message)).find();
+    }
+
+    public static String resolveResponseStyle(String requestedStyle, String latestMessage) {
+        String normalized = requestedStyle == null
+                ? "auto"
+                : requestedStyle.trim().toLowerCase(Locale.ROOT);
+
+        if ("concise".equals(normalized)
+                || "balanced".equals(normalized)
+                || "detailed".equals(normalized)) {
+            return normalized;
+        }
+
+        return isDetailedWork(latestMessage) ? "detailed" : "concise";
     }
 
     public static String latestUserMessage(List<GroqMessage> messages) {

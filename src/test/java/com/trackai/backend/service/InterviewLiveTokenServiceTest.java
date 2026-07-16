@@ -8,6 +8,7 @@ import com.trackai.backend.dto.interview.LiveInterviewTokenRequest;
 import com.trackai.backend.enums.FeatureType;
 import com.trackai.backend.exception.InterviewException;
 import com.trackai.backend.security.JwtUserPrincipal;
+import com.trackai.backend.repository.ResumeProjectRepository;
 import com.trackai.backend.service.impl.InterviewLiveTokenServiceImpl;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -80,7 +81,8 @@ class InterviewLiveTokenServiceTest {
         JwtUserPrincipal principal = new JwtUserPrincipal("user-1", "user@example.com", "ROLE_USER");
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
-        return new InterviewLiveTokenServiceImpl(gemini, live, rateLimits, users, wallet, tokens,
+        ResumeProjectRepository resumes = mock(ResumeProjectRepository.class);
+        return new InterviewLiveTokenServiceImpl(gemini, live, rateLimits, users, wallet, tokens, resumes,
                 WebClient.builder().baseUrl(gemini.getBaseUrl()).build());
     }
 

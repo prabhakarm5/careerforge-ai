@@ -9,6 +9,8 @@ import java.time.LocalDateTime;
 public record SupportTicketSummaryResponse(
         String id,
         String userId,
+        String userName,
+        String userEmail,
         String subject,
         SupportTicketCategory category,
         SupportTicketPriority priority,

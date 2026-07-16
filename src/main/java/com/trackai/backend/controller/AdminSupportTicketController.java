@@ -35,6 +35,12 @@ public class AdminSupportTicketController {
         return ResponseEntity.ok(supportTicketService.replyAsAdmin(ticketId, request));
     }
 
+    @DeleteMapping("/{ticketId}")
+    public ResponseEntity<Void> delete(@PathVariable String ticketId) {
+        supportTicketService.deleteAsAdmin(ticketId);
+        return ResponseEntity.noContent().build();
+    }
+
     @PatchMapping("/{ticketId}/status")
     public ResponseEntity<SupportTicketResponse> updateStatus(
             @PathVariable String ticketId,

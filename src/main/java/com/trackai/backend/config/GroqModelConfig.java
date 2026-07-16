@@ -37,6 +37,8 @@ public class GroqModelConfig {
         private boolean vision;
         private String provider = "GROQ";
         private String type = "chat";
+        private boolean premium;
+        private long minimumCredits;
         // FIX (dynamic max_tokens): model ka total context window (tokens
         // mein). GroqServiceImpl isse use karta hai ye calculate karne ke
         // liye ki input + output milake kitna room available hai, taaki
@@ -47,6 +49,16 @@ public class GroqModelConfig {
         // aur GroqServiceImpl apne aap ek safe default (8192) assume kar
         // lega — compile ya runtime crash nahi hoga.
         private int contextLength;
+    }
+
+    public ModelInfo findModel(String requestedId) {
+        if (requestedId == null || requestedId.isBlank()) {
+            return resolveModel(null);
+        }
+        return models.stream()
+                .filter(model -> requestedId.equals(model.getId()))
+                .findFirst()
+                .orElse(null);
     }
 
     /**

@@ -156,6 +156,11 @@ public class OpenRouterImageProvider
          */
 
         @Override
+        public boolean supports(String modelId) {
+                return modelId == null || modelId.isBlank() || !modelId.startsWith("huggingface:");
+        }
+
+        @Override
         public GenerateImageResponse generateImage(
                         GenerateImageRequest request) {
 
@@ -183,6 +188,7 @@ public class OpenRouterImageProvider
 
                 GenerateImageResponse.GenerateImageResponseBuilder result = GenerateImageResponse.builder()
                                 .prompt(request.getPrompt())
+                                .modelId(properties.resolveImageModel(request.getModel()))
                                 .provider("OPENROUTER");
 
                 if (image.getB64Json() != null

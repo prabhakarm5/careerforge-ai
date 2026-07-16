@@ -44,8 +44,18 @@ public class RequestLoggingFilter extends OncePerRequestFilter {
                     request.getRemoteAddr());
 
             if (shouldCapture(request, response)) {
-                monitoringService.recordRequest(request, response.getStatus(), duration);
+                monitoringService.recordRequest(request, response.getStatus(), duration, response.getContentType(), responseSize(response));
             }
+        }
+    }
+
+    private long responseSize(HttpServletResponse response) {
+        String value = response.getHeader("Content-Length");
+        if (value == null || value.isBlank()) return 0;
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException ignored) {
+            return 0;
         }
     }
 

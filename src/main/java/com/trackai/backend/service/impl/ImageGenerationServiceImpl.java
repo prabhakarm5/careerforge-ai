@@ -1,10 +1,13 @@
 package com.trackai.backend.service.impl;
 
+import com.trackai.backend.config.HuggingFaceImageProperties;
+import com.trackai.backend.config.OpenRouterProperties;
 import com.trackai.backend.config.TokenProperties;
 import com.trackai.backend.dto.cloudinary.CloudinaryUploadResponse;
 import com.trackai.backend.dto.image.GenerateImageRequest;
 import com.trackai.backend.dto.image.GenerateImageResponse;
 import com.trackai.backend.dto.image.ImageHistoryResponse;
+import com.trackai.backend.dto.image.ImageModelResponse;
 import com.trackai.backend.entity.GeneratedImage;
 import com.trackai.backend.entity.User;
 import com.trackai.backend.enums.ImageStatus;
@@ -16,304 +19,200 @@ import com.trackai.backend.service.ImageDownloaderService;
 import com.trackai.backend.service.ImageGenerationService;
 import com.trackai.backend.service.UserService;
 import com.trackai.backend.service.WalletService;
-
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
-
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 @Service
-
 @RequiredArgsConstructor
-public class ImageGenerationServiceImpl
-                implements ImageGenerationService {
+public class ImageGenerationServiceImpl implements ImageGenerationService {
 
-        private final WalletService walletService;
+    private static final int HISTORY_LIMIT = 100;
 
-        private final AIImageProvider imageProvider;
+    private final WalletService walletService;
+    private final List<AIImageProvider> imageProviders;
+    private final GeneratedImageRepository repository;
+    private final UserService userService;
+    private final ImageDownloaderService imageDownloaderService;
+    private final CloudinaryService cloudinaryService;
+    private final TokenProperties tokenProperties;
+    private final OpenRouterProperties openRouterProperties;
+    private final HuggingFaceImageProperties huggingFaceImageProperties;
 
-        private final GeneratedImageRepository repository;
+    @Override
+    @Transactional
+    public GenerateImageResponse generateImage(GenerateImageRequest request) {
+        walletService.checkImageGenerationTokens();
+        User user = userService.getCurrentUser();
 
-        private final UserService userService;
+        AIImageProvider imageProvider = imageProviders.stream()
+                .filter(provider -> provider.supports(request.getModel()))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Selected image model is not available."));
+        GenerateImageResponse providerResponse = imageProvider.generateImage(request);
 
-        private final ImageDownloaderService imageDownloaderService;
-
-        private final CloudinaryService cloudinaryService;
-
-        private final TokenProperties tokenProperties;
-
-        @Override
-        @Transactional
-        public GenerateImageResponse generateImage(
-                        GenerateImageRequest request) {
-
-                // Wallet Check
-                walletService.checkImageGenerationTokens();
-
-                // Generate from OpenRouter
-                GenerateImageResponse response = imageProvider.generateImage(request);
-
-                // URL or Base64
-                byte[] imageBytes;
-
-                if (response.getImageBytes() != null) {
-
-                        imageBytes = response.getImageBytes();
-
-                } else {
-
-                        imageBytes = imageDownloaderService.downloadImage(
-
-                                        response.getImageUrl()
-
-                        );
-
-                }
-
-                // Upload to Cloudinary
-                CloudinaryUploadResponse upload =
-
-                                cloudinaryService.uploadGeneratedImage(
-
-                                                imageBytes
-
-                                );
-
-                // Current User
-                User user = userService.getCurrentUser();
-
-                // Save
-                GeneratedImage image = GeneratedImage.builder()
-
-                                .prompt(request.getPrompt())
-
-                                .imageUrl(
-
-                                                response.getImageUrl() == null
-                                                                ? upload.getSecureUrl()
-                                                                : response.getImageUrl()
-
-                                )
-
-                                .storageUrl(
-
-                                                upload.getSecureUrl()
-
-                                )
-
-                                .provider(
-
-                                                response.getProvider()
-
-                                )
-
-                                .providerImageId(
-
-                                                response.getProviderImageId()
-
-                                )
-
-                                .cloudinaryPublicId(
-
-                                                upload.getPublicId()
-
-                                )
-
-                                .tokensUsed(
-
-                                                tokenProperties.getImage()
-
-                                )
-
-                                .status(
-
-                                                ImageStatus.COMPLETED.name()
-
-                                )
-
-                                .favorite(false)
-
-                                .user(user)
-
-                                .build();
-
-                repository.save(image);
-
-                // Consume Wallet
-                walletService.consumeImageTokens(
-
-                                tokenProperties.getImage()
-
-                );
-
-                // Return Response
-                response.setStorageUrl(
-
-                                upload.getSecureUrl()
-
-                );
-
-                return response;
-
+        byte[] imageBytes = providerResponse.getImageBytes() != null
+                ? providerResponse.getImageBytes()
+                : imageDownloaderService.downloadImage(providerResponse.getImageUrl());
+        if (imageBytes == null || imageBytes.length == 0) {
+            throw new RuntimeException("The image provider returned an empty image.");
         }
 
-        @Override
-        public List<ImageHistoryResponse> getHistory() {
+        CloudinaryUploadResponse upload = cloudinaryService.uploadGeneratedImage(imageBytes);
+        String selectedModel = providerResponse.getModelId() != null
+                ? providerResponse.getModelId()
+                : request.getModel();
 
-                User user = userService.getCurrentUser();
+        GeneratedImage saved = repository.save(GeneratedImage.builder()
+                .prompt(request.getPrompt().trim())
+                // Always expose the stable Cloudinary URL; provider CDN URLs may expire.
+                .imageUrl(upload.getSecureUrl())
+                .storageUrl(upload.getSecureUrl())
+                .provider(providerResponse.getProvider())
+                .modelId(selectedModel)
+                .providerImageId(providerResponse.getProviderImageId())
+                .cloudinaryPublicId(upload.getPublicId())
+                .tokensUsed(tokenProperties.getImage())
+                .status(ImageStatus.COMPLETED.name())
+                .favorite(false)
+                .user(user)
+                .build());
 
-                return repository
+        walletService.consumeImageTokens(tokenProperties.getImage());
+        return toGenerateResponse(saved);
+    }
 
-                                .findByUserOrderByCreatedAtDesc(user)
+    @Override
+    public List<ImageHistoryResponse> getHistory() {
+        String userId = userService.getCurrentUser().getId();
+        return repository.findByUserIdOrderByCreatedAtDesc(userId, PageRequest.of(0, HISTORY_LIMIT))
+                .stream()
+                .map(this::toHistoryResponse)
+                .toList();
+    }
 
-                                .stream()
-
-                                .map(image ->
-
-                                ImageHistoryResponse.builder()
-
-                                                .id(image.getId())
-
-                                                .prompt(image.getPrompt())
-
-                                                .imageUrl(image.getImageUrl())
-
-                                                .storageUrl(image.getStorageUrl())
-
-                                                .tokensUsed(image.getTokensUsed())
-
-                                                .favorite(image.getFavorite())
-
-                                                .createdAt(image.getCreatedAt())
-
-                                                .build()
-
-                                )
-
-                                .toList();
-
+    @Override
+    public List<ImageModelResponse> getModels() {
+        List<ImageModelResponse> models = new ArrayList<>();
+        if (huggingFaceImageProperties.isEnabled()) {
+            for (HuggingFaceImageProperties.ModelInfo model : huggingFaceImageProperties.availableModels()) {
+                models.add(ImageModelResponse.builder()
+                        .id("huggingface:" + model.getId())
+                        .label(model.getLabel())
+                        .description(model.getDescription())
+                        .provider("HUGGING_FACE")
+                        .supportsImageInput(model.isSupportsImageInput())
+                        .requiresImageInput(model.isRequiresImageInput())
+                        .defaultModel(model.isDefaultModel())
+                        .accessLabel("HF free credits")
+                        .build());
+            }
         }
-
-        @Override
-        @Transactional
-        public void delete(
-                        String imageId) {
-
-                User user = userService.getCurrentUser();
-
-                GeneratedImage image = repository
-
-                                .findByIdAndUser(
-                                                imageId,
-                                                user)
-
-                                .orElseThrow(() ->
-
-                                new ImageNotFoundException(
-                                                "Image not found"));
-
-                if (image.getCloudinaryPublicId() != null
-                                && !image.getCloudinaryPublicId().isBlank()) {
-
-                        try {
-
-                                cloudinaryService.deleteImage(
-
-                                                image.getCloudinaryPublicId()
-
-                                );
-
-                        }
-
-                        catch (Exception ignored) {
-
-                        }
-
-                }
-
-                repository.delete(image);
-
+        for (OpenRouterProperties.ModelInfo model : openRouterProperties.getImageModels()) {
+            models.add(ImageModelResponse.builder()
+                    .id(model.getId())
+                    .label(model.getLabel())
+                    .description(model.getDescription())
+                    .provider("OPENROUTER")
+                    .supportsImageInput(true)
+                    .requiresImageInput(false)
+                    .defaultModel(models.isEmpty())
+                    .accessLabel("Premium")
+                    .build());
         }
+        return models;
+    }
 
-        @Override
-        @Transactional
-        public void toggleFavorite(
-                        String imageId) {
+    @Override
+    @Transactional
+    public void delete(String imageId) {
+        String userId = userService.getCurrentUser().getId();
+        GeneratedImage image = ownedImage(imageId, userId);
 
-                User user = userService.getCurrentUser();
-
-                GeneratedImage image = repository
-
-                                .findByIdAndUser(
-                                                imageId,
-                                                user)
-
-                                .orElseThrow(() ->
-
-                                new ImageNotFoundException(
-                                                "Image not found"));
-
-                image.setFavorite(
-
-                                !Boolean.TRUE.equals(
-                                                image.getFavorite())
-
-                );
-
-                repository.save(image);
-
+        if (image.getCloudinaryPublicId() != null && !image.getCloudinaryPublicId().isBlank()) {
+            try {
+                cloudinaryService.deleteImage(image.getCloudinaryPublicId());
+            } catch (RuntimeException ignored) {
+                // The database record must still be removable when remote cleanup is unavailable.
+            }
         }
+        repository.delete(image);
+        repository.flush();
+    }
 
-        @Override
-        @Transactional
-        public GenerateImageResponse regenerate(
-                        String imageId) {
+    @Override
+    @Transactional
+    public ImageHistoryResponse toggleFavorite(String imageId) {
+        String userId = userService.getCurrentUser().getId();
+        GeneratedImage image = ownedImage(imageId, userId);
+        image.setFavorite(!Boolean.TRUE.equals(image.getFavorite()));
+        return toHistoryResponse(repository.save(image));
+    }
 
-                User user = userService.getCurrentUser();
+    @Override
+    @Transactional
+    public GenerateImageResponse regenerate(String imageId) {
+        String userId = userService.getCurrentUser().getId();
+        GeneratedImage image = ownedImage(imageId, userId);
+        GenerateImageRequest request = new GenerateImageRequest();
+        request.setPrompt(image.getPrompt());
+        request.setModel(image.getModelId());
+        return generateImage(request);
+    }
 
-                GeneratedImage image = repository
+    @Override
+    public Map<String, String> download(String imageId) {
+        String userId = userService.getCurrentUser().getId();
+        GeneratedImage image = ownedImage(imageId, userId);
+        String url = image.getStorageUrl() == null || image.getStorageUrl().isBlank()
+                ? image.getImageUrl()
+                : image.getStorageUrl();
+        return Map.of("downloadUrl", url);
+    }
 
-                                .findByIdAndUser(
-                                                imageId,
-                                                user)
-
-                                .orElseThrow(() ->
-
-                                new ImageNotFoundException(
-                                                "Image not found"));
-
-                GenerateImageRequest request = new GenerateImageRequest();
-
-                request.setPrompt(
-
-                                image.getPrompt()
-
-                );
-
-                return generateImage(
-
-                                request
-
-                );
-
+    private GeneratedImage ownedImage(String imageId, String userId) {
+        if (imageId == null || imageId.isBlank() || "undefined".equalsIgnoreCase(imageId)) {
+            throw new ImageNotFoundException("Image id is missing. Refresh history and try again.");
         }
+        return repository.findByIdAndUserId(imageId, userId)
+                .orElseThrow(() -> new ImageNotFoundException("Image not found."));
+    }
 
-        @Override
-        public Map<String, String> download(String imageId) {
+    private ImageHistoryResponse toHistoryResponse(GeneratedImage image) {
+        return ImageHistoryResponse.builder()
+                .id(image.getId())
+                .prompt(image.getPrompt())
+                .imageUrl(image.getImageUrl())
+                .storageUrl(image.getStorageUrl())
+                .provider(image.getProvider())
+                .modelId(image.getModelId())
+                .status(image.getStatus())
+                .tokensUsed(image.getTokensUsed())
+                .favorite(image.getFavorite())
+                .createdAt(image.getCreatedAt())
+                .build();
+    }
 
-                User user = userService.getCurrentUser();
-
-                GeneratedImage image = repository
-
-                                .findByIdAndUser(imageId, user)
-
-                                .orElseThrow(() -> new ImageNotFoundException("Image not found"));
-
-                return Map.of(
-                                "downloadUrl",
-                                image.getStorageUrl());
-        }
+    private GenerateImageResponse toGenerateResponse(GeneratedImage image) {
+        return GenerateImageResponse.builder()
+                .id(image.getId())
+                .prompt(image.getPrompt())
+                .imageUrl(image.getImageUrl())
+                .storageUrl(image.getStorageUrl())
+                .provider(image.getProvider())
+                .modelId(image.getModelId())
+                .providerImageId(image.getProviderImageId())
+                .tokensUsed(image.getTokensUsed())
+                .favorite(image.getFavorite())
+                .status(image.getStatus())
+                .createdAt(image.getCreatedAt())
+                // Raw provider bytes are uploaded once and never echoed as a huge base64 JSON field.
+                .imageBytes(null)
+                .build();
+    }
 }

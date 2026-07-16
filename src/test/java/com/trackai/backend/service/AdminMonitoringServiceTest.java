@@ -2,6 +2,7 @@ package com.trackai.backend.service;
 
 import com.trackai.backend.config.MonitoringProperties;
 import com.trackai.backend.repository.UserRepository;
+import com.trackai.backend.service.impl.AdminMonitoringServiceImpl;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,7 +25,7 @@ class AdminMonitoringServiceTest {
         properties = new MonitoringProperties();
         properties.setMaxEvents(100);
         properties.setRetentionHours(24);
-        service = new AdminMonitoringService(userRepository, properties);
+        service = new AdminMonitoringServiceImpl(userRepository, properties);
     }
 
     @Test
@@ -36,7 +37,7 @@ class AdminMonitoringServiceTest {
                 "IN",
                 "administrator@example.com");
 
-        service.recordRequest(request, 200, 18);
+        service.recordRequest(request, 200, 18, "application/json", 128);
 
         var overview = service.overview();
         var entry = overview.recentRequests().getFirst();
@@ -44,6 +45,8 @@ class AdminMonitoringServiceTest {
         assertThat(entry.maskedIp()).isEqualTo("203.0.113.x");
         assertThat(entry.user()).isEqualTo("ad***@example.com");
         assertThat(entry.country()).isEqualTo("IN");
+        assertThat(entry.responseSummary()).isEqualTo("Completed successfully");
+        assertThat(entry.responseBytes()).isEqualTo(128);
     }
 
     @Test
@@ -55,7 +58,7 @@ class AdminMonitoringServiceTest {
                 "US",
                 null);
 
-        service.recordRequest(request, 503, 90);
+        service.recordRequest(request, 503, 90, "application/json", 64);
 
         var overview = service.overview();
         var entry = overview.recentRequests().getFirst();

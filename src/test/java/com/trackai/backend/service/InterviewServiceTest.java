@@ -66,7 +66,7 @@ class InterviewServiceTest {
 
         assertThat(response.getId()).isEqualTo("interview-1");
         assertThat(response.getCurrentQuestion()).contains("service you designed");
-        verify(wallet).consumeTokens("user-1", 12L, FeatureType.CHAT, "Interview practice start");
+        verify(wallet).consumeTokens("user-1", 12L, FeatureType.INTERVIEW, "Interview practice start");
         verify(persistence).saveSession(any(InterviewSession.class));
     }
 
@@ -77,7 +77,7 @@ class InterviewServiceTest {
                 .thenThrow(new IllegalStateException("Provider unavailable"));
 
         assertThatThrownBy(() -> service.start(request())).hasMessage("Provider unavailable");
-        verify(wallet).addTokens("user-1", 12L, FeatureType.CHAT, "Refund failed interview start");
+        verify(wallet).addTokens("user-1", 12L, FeatureType.INTERVIEW, "Refund failed interview start");
         verify(persistence, never()).saveSession(any());
     }
 

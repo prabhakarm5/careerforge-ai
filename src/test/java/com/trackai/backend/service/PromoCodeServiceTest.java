@@ -83,6 +83,18 @@ class PromoCodeServiceTest {
     }
 
     @Test
+    void adminListKeepsDisabledCampaignsVisibleWithTargets() {
+        PromoCode promo = promo("PRIVATE", PromoAudience.SPECIFIC_USERS);
+        promo.setActive(false);
+        promo.setTargetUserEmails(Set.of("user@example.com"));
+        when(promoRepository.findAllByOrderByCreatedAtDesc()).thenReturn(List.of(promo));
+
+        PromoCodeResponse response = service.getAll().getFirst();
+
+        assertThat(response.active()).isFalse();
+        assertThat(response.targetUserEmails()).containsExactly("user@example.com");
+    }
+    @Test
     void tokenRewardIsGrantedOnlyOnce() {
         PromoCode promo = promo("THANKS", PromoAudience.ALL_USERS);
         promo.setRewardType(PromoRewardType.BONUS_TOKENS);

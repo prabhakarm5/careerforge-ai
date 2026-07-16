@@ -58,23 +58,12 @@ public class GroqServiceImpl implements GroqService {
         private static final int DEFAULT_ASSUMED_CONTEXT_WINDOW = 8192;
         private static final int CHARS_PER_TOKEN_ESTIMATE = 4;
 
-        // FIX (bhai's report: "answer aadha mein ruk jaata hai" + "bahut slow"):
-        // Jab model apni max_tokens limit hit karta tha (finish_reason:
-        // "length"), purana code ise ERROR treat karta tha aur
-        // ChatServiceImpl ka fallback/continuation chain trigger hota tha Ã¢â‚¬â€
-        // jo poora accumulated text + poora memory leke agle model ko
-        // bhejta tha, phir wahi truncate ho jaaye to teesre model ko... max
-        // 6 baar tak. Har hop ek naya network round-trip hai (isliye slow),
-        // aur agar 6 attempts ke baad bhi bade code ke liye truncate hota
-        // rahe to answer bina kisi spasht "yeh incomplete hai" note ke
-        // ruk jaata tha (isliye "beech mein atka hua" jaisa lagta tha).
-        //
-        // Naya behaviour: truncation par doosre model par kabhi jump nahi
-        // karte. Bas ek chhota polite note chipka ke stream ko turant,
-        // cleanly complete kar dete hain. Isse dono cheez fix Ã¢â‚¬â€ speed
-        // (no more multi-model chaining) aur "atakna" (hamesha ek clean,
-        // complete-feeling ending milega).
-        private static final String TRUNCATION_NOTE = "\n\n---\n_Answer budget reached, so I wrapped this response as tightly as possible. Ask for a specific section if you want it expanded._";
+        // A provider can cap one response even when the requested artifact is valid.
+        // Continue only after finish_reason=length, using the same model and stream.
+        private static final int MAX_AUTO_CONTINUATIONS = 5;
+        private static final String CONTINUATION_PROMPT = "Continue exactly from the next character after your previous output. "
+                        + "Do not repeat, summarize, restart, add a preamble, reopen an existing code fence, or mention continuation. "
+                        + "Complete the full requested code or document, including every remaining closing fence and tag.";
 
         private static final String SYSTEM_PROMPT = """
                         You are CareerForge AI, a knowledgeable and helpful assistant.
@@ -82,20 +71,21 @@ public class GroqServiceImpl implements GroqService {
                         Response rules:
                         - The latest user message is the active instruction. Its requested language, output format,
                           and length override earlier tasks. Never continue an earlier artifact unless asked now.
-                        - Match the latest user's language. Be concise by default: usually 1-4 sentences and under
-                          120 words.
+                        - Match the latest user's language. Adapt answer length to the actual request and the supplied
+                          response-style instruction. Ordinary questions can be concise, while code, pages, files,
+                          documents, and detailed explanations must include every necessary section.
                         - Use headings, lists, tables, and code blocks only when they help the current request.
                         - For an ambiguous short follow-up, ask one short context-aware question. Do not guess a new
                           task, repeat an old answer, or dump code.
-                        - If the user asks for an exact reply such as "only say yes", output exactly that and nothing
-                          else.
-                        - For explicit code/file/page requests, provide a compact complete working result and finish
-                          cleanly. Never output mojibake, giant data URLs, or claims of web search that did not happen.
-                        - For a web page or single-file HTML request, put the entire source in exactly one Markdown
-                          code fence labelled html. Include doctype, head, body, and closing html tag. Never emit
-                          raw HTML outside that fence.
-                        - If the requested page is too large for the answer budget, reduce repetition and detail so
-                          the complete working file still finishes. Never leave a half-written section or open tag.
+                        - If the user asks for an exact reply such as "only say yes", output exactly that and nothing else.
+                        - For explicit code/file/page requests, provide a complete working result. Never output mojibake,
+                          giant data URLs, invented web-search claims, answer-budget notices, or continuation instructions.
+                        - The client already provides artifact preview, copy, and download controls. Never output CodePen,
+                          StackBlitz, or JSFiddle links, raw HTML anchor tags, Blob URLs, data:text/html URLs, or a separate
+                          preview-links section.
+                        - For a web page or single-file HTML request, put the entire source in exactly one Markdown code
+                          fence labelled html. Include doctype, head, body, and closing html tag. Never emit raw HTML
+                          outside that fence and never leave a half-written property, section, code fence, or open tag.
                         - If an image is attached, analyze it before answering.
                         - Never identify yourself as an underlying model. You are CareerForge AI.
                         """;
@@ -274,16 +264,34 @@ public class GroqServiceImpl implements GroqService {
                         Consumer<Throwable> onError) {
 
                 GroqModelConfig.ModelInfo resolved = groqModelConfig.resolveModel(modelId);
-                boolean useImage = imageBase64 != null && !imageBase64.isBlank() && resolved.isVision();
+                streamSegment(messages, resolved, imageBase64, 0, new StringBuilder(), onChunk, onComplete, onError);
+        }
 
-                int dynamicMaxTokens = computeDynamicMaxTokens(messages, resolved.getId());
+        private void streamSegment(
+                        List<GroqMessage> baseMessages,
+                        GroqModelConfig.ModelInfo resolved,
+                        String imageBase64,
+                        int continuationIndex,
+                        StringBuilder accumulated,
+                        Consumer<String> onChunk,
+                        Runnable onComplete,
+                        Consumer<Throwable> onError) {
 
-                log.info("Groq stream request Ã¢â‚¬â€ model={}, dynamicMaxTokens={}", resolved.getId(), dynamicMaxTokens);
+                List<GroqMessage> requestMessages = continuationIndex == 0
+                                ? baseMessages
+                                : buildContinuationMessages(baseMessages, accumulated.toString());
+                boolean useImage = continuationIndex == 0
+                                && imageBase64 != null
+                                && !imageBase64.isBlank()
+                                && resolved.isVision();
+                int dynamicMaxTokens = computeDynamicMaxTokens(requestMessages, resolved.getId());
+
+                log.info("Groq stream request - model={}, dynamicMaxTokens={}, continuation={}",
+                                resolved.getId(), dynamicMaxTokens, continuationIndex);
 
                 Object requestBody = useImage
-                                ? buildVisionRequestBody(messages, resolved.getId(), imageBase64, dynamicMaxTokens)
-                                : buildTextRequestBody(messages, resolved.getId(), dynamicMaxTokens);
-
+                                ? buildVisionRequestBody(requestMessages, resolved.getId(), imageBase64, dynamicMaxTokens)
+                                : buildTextRequestBody(requestMessages, resolved.getId(), dynamicMaxTokens);
                 AtomicBoolean truncated = new AtomicBoolean(false);
 
                 client().post()
@@ -292,38 +300,46 @@ public class GroqServiceImpl implements GroqService {
                                 .bodyValue(requestBody)
                                 .retrieve()
                                 .onStatus(status -> status.value() == 429,
-                                                clientResponse -> Mono.error(
-                                                                new GroqRateLimitException(
-                                                                                "Model rate-limited: "
-                                                                                                + resolved.getId())))
+                                                clientResponse -> Mono.error(new GroqRateLimitException(
+                                                                "Model rate-limited: " + resolved.getId())))
                                 .onStatus(status -> status.is5xxServerError(),
-                                                clientResponse -> Mono.error(
-                                                                new GroqRateLimitException(
-                                                                                "Model unavailable: "
-                                                                                                + resolved.getId())))
+                                                clientResponse -> Mono.error(new GroqRateLimitException(
+                                                                "Model unavailable: " + resolved.getId())))
                                 .bodyToFlux(String.class)
                                 .doOnError(err -> log.error("Groq streaming error (model={}): {}",
                                                 resolved.getId(), err.toString()))
                                 .subscribe(
                                                 rawLine -> {
-                                                        if (handleLine(rawLine, onChunk)) {
+                                                        if (handleLine(rawLine, chunk -> {
+                                                                accumulated.append(chunk);
+                                                                onChunk.accept(chunk);
+                                                        })) {
                                                                 truncated.set(true);
                                                         }
                                                 },
                                                 onError,
                                                 () -> {
-                                                        // FIX: truncation ab error/fallback-chain trigger
-                                                        // nahi karta. Bas ek note chipka ke turant,
-                                                        // cleanly complete karte hain Ã¢â‚¬â€ fast bhi, aur
-                                                        // "beech mein atka" wala feeling bhi nahi aata.
+                                                        if (truncated.get() && continuationIndex < MAX_AUTO_CONTINUATIONS) {
+                                                                log.info("Groq output limit reached; continuing same stream automatically (part {})",
+                                                                                continuationIndex + 2);
+                                                                streamSegment(baseMessages, resolved, null,
+                                                                                continuationIndex + 1, accumulated,
+                                                                                onChunk, onComplete, onError);
+                                                                return;
+                                                        }
                                                         if (truncated.get()) {
-                                                                log.warn(
-                                                                                "Groq stream truncated at max_tokens (model={}) Ã¢â‚¬â€ finishing gracefully with note",
-                                                                                resolved.getId());
-                                                                onChunk.accept(TRUNCATION_NOTE);
+                                                                log.warn("Groq output remained truncated after {} automatic continuations (model={})",
+                                                                                MAX_AUTO_CONTINUATIONS, resolved.getId());
                                                         }
                                                         onComplete.run();
                                                 });
+        }
+
+        private List<GroqMessage> buildContinuationMessages(List<GroqMessage> baseMessages, String accumulated) {
+                List<GroqMessage> continuation = new ArrayList<>(baseMessages);
+                continuation.add(new GroqMessage("assistant", accumulated));
+                continuation.add(new GroqMessage("user", CONTINUATION_PROMPT));
+                return continuation;
         }
 
         // ===================== DYNAMIC TOKEN SIZING =====================
@@ -483,7 +499,12 @@ public class GroqServiceImpl implements GroqService {
                                 onChunk.accept(delta.getContent());
                         }
 
-                        return "length".equals(choice.getFinishReason());
+                        String finishReason = choice.getFinishReason();
+                        return finishReason != null && (
+                                        "length".equalsIgnoreCase(finishReason)
+                                        || "max_tokens".equalsIgnoreCase(finishReason)
+                                        || "max_output_tokens".equalsIgnoreCase(finishReason)
+                                        || "token_limit".equalsIgnoreCase(finishReason));
                 } catch (Exception e) {
                         log.debug("Skipping unparsable Groq stream line: {}", line);
                         return false;
