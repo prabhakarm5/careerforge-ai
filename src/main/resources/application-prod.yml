@@ -12,6 +12,9 @@
 server:
   port: ${SERVER_PORT:9092}
   shutdown: graceful
+
+   # ⭐ ADD THIS
+  forward-headers-strategy: framework
   compression:
     enabled: true
     min-response-size: 1024
