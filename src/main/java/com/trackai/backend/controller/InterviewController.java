@@ -3,10 +3,12 @@ package com.trackai.backend.controller;
 import com.trackai.backend.dto.interview.*;
 import com.trackai.backend.service.InterviewService;
 import com.trackai.backend.service.InterviewLiveTokenService;
+import com.trackai.backend.service.InterviewContextExtractionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -16,6 +18,15 @@ import java.util.List;
 public class InterviewController {
     private final InterviewService interviewService;
     private final InterviewLiveTokenService interviewLiveTokenService;
+    private final InterviewContextExtractionService contextExtractionService;
+
+    @PostMapping(path = "/context/extract", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<InterviewContextExtractionResponse> extractContext(
+            @RequestPart("file") MultipartFile file,
+            @RequestPart(value = "model", required = false) String model,
+            @RequestPart(value = "contextType", required = false) String contextType) {
+        return ResponseEntity.ok(contextExtractionService.extract(file, model, contextType));
+    }
 
     @PostMapping("/live-token")
     public ResponseEntity<LiveInterviewTokenResponse> liveToken(

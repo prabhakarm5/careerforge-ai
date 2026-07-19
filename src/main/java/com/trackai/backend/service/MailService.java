@@ -1,7 +1,5 @@
 package com.trackai.backend.service;
 
-import org.springframework.scheduling.annotation.Async;
-
 import com.trackai.backend.entity.PaymentTransaction;
 
 public interface MailService {
@@ -51,20 +49,13 @@ public interface MailService {
                         long expiryMinutes);
 
         // SEND PAYMENT SUCCESS EMAIL
-        @Async
         void sendPaymentSuccessEmail(String userName, String toEmail, PaymentTransaction txn, byte[] invoicePdf);
 
         // CHANGED: added refundSlaDays so the failed-payment email can tell the
         // user exactly how many business days a refund takes, instead of a
         // vague "will be refunded" with no timeline.
-        @Async
         void sendPaymentFailedEmail(String userName, String toEmail, PaymentTransaction txn, String reason,
                         byte[] invoicePdf, int refundSlaDays);
-
-        @Async
         void sendAdminMessage(String userName, String toEmail, String subject, String message);
-
-        @Async
-        public void sendAdminLoginOtpAsync(String name, String email, String otp, long expiryMinutes);
 
 }

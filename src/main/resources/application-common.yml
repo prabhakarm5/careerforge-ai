@@ -624,6 +624,7 @@ trackai:
     interview-start: ${TOKEN_COST_INTERVIEW_START:10}
     interview-answer: ${TOKEN_COST_INTERVIEW_ANSWER:10}
     interview-live: ${TOKEN_COST_INTERVIEW_LIVE:25}
+    interview-context: ${TOKEN_COST_INTERVIEW_CONTEXT:5}
     website: 500
     pdf: 50
     audio: 80

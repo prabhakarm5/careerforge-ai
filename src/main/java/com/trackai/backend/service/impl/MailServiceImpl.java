@@ -2,15 +2,8 @@ package com.trackai.backend.service.impl;
 
 import com.trackai.backend.entity.PaymentTransaction;
 import com.trackai.backend.service.MailService;
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
+import com.trackai.backend.service.MailDeliveryService;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.format.DateTimeFormatter;
@@ -18,21 +11,9 @@ import java.time.format.DateTimeFormatter;
 @Service
 @RequiredArgsConstructor
 public class MailServiceImpl implements MailService {
+        private final MailDeliveryService mailDeliveryService;
 
-        private static final Logger log = LoggerFactory.getLogger(MailServiceImpl.class);
-
-        private final JavaMailSender mailSender;
-
-        @Value("${spring.mail.username}")
-        private String fromEmail;
-
-        @Value("${app.mail.from-name}")
-        private String fromName;
-
-        @Value("${app.mail.reply-to:${spring.mail.username}}")
-        private String replyTo;
-
-        // ── shared brand tokens ─────────────────────────────────────────────
+        // Shared brand tokens used by every prepared email template.
         private static final String BRAND_GRADIENT = "linear-gradient(135deg,#7c3aed,#4f46e5)";
         private static final String SUCCESS_GRADIENT = "linear-gradient(135deg,#16a34a,#059669)";
         private static final String FAILED_GRADIENT = "linear-gradient(135deg,#dc2626,#b91c1c)";
@@ -43,43 +24,24 @@ public class MailServiceImpl implements MailService {
         private static final String BORDER = "#221f33";
         private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd MMM yyyy, hh:mm a");
 
-        // ── core sender ──────────────────────────────────────────────────────
+        // All caller-side validation and template preparation are complete before this handoff.
         private void send(String toEmail, String subject, String htmlBody) {
                 send(toEmail, subject, htmlBody, null, null);
         }
 
         private void send(String toEmail, String subject, String htmlBody, byte[] attachment,
                         String attachmentName) {
-                try {
-                        MimeMessage mimeMessage = mailSender.createMimeMessage();
-
-                        MimeMessageHelper helper = new MimeMessageHelper(
-                                        mimeMessage,
-                                        MimeMessageHelper.MULTIPART_MODE_MIXED_RELATED,
-                                        "UTF-8");
-
-                        helper.setFrom(fromEmail, fromName);
-                        helper.setReplyTo(replyTo, fromName);
-                        helper.setTo(toEmail);
-                        helper.setSubject(subject);
-                        helper.setSentDate(new java.util.Date());
-                        helper.setText(toPlainText(htmlBody), htmlBody);
-                        mimeMessage.setHeader("X-Auto-Response-Suppress", "All");
-
-                        if (attachment != null) {
-                                helper.addAttachment(attachmentName,
-                                                new org.springframework.core.io.ByteArrayResource(attachment));
-                        }
-
-                        mailSender.send(mimeMessage);
-
-                } catch (MessagingException | java.io.UnsupportedEncodingException e) {
-                        log.error("Failed to send email to {}: {}", toEmail, e.getMessage());
-                        throw new RuntimeException("Failed to send email", e);
+                if (toEmail == null || toEmail.isBlank()) {
+                        throw new IllegalArgumentException("Recipient email is required");
                 }
+                if (subject == null || subject.isBlank() || htmlBody == null || htmlBody.isBlank()) {
+                        throw new IllegalArgumentException("Email subject and body are required");
+                }
+                byte[] safeAttachment = attachment == null ? null : attachment.clone();
+                mailDeliveryService.send(toEmail.trim(), subject.trim(), htmlBody, safeAttachment, attachmentName);
         }
 
-        // ── shared HTML shell ────────────────────────────────────────────────
+        // Shared HTML shell ────────────────────────────────────────────────
         // Table-based layout + inline styles only, because Gmail/Outlook strip
         // <style> blocks and modern CSS unpredictably. This renders consistently
         // across clients. accentGradient lets each email type (info/success/fail)
@@ -285,7 +247,6 @@ public class MailServiceImpl implements MailService {
 
         // ── ADMIN LOGIN OTP ──────────────────────────────────────────────────
         @Override
-        @Async
         public void sendAdminLoginOtp(String userName, String toEmail, String otp, long expiryMinutes) {
 
                 String body = paragraph("Hello <b style=\"color:#e2e8f0;\">" + userName + "</b>,")
@@ -303,24 +264,12 @@ public class MailServiceImpl implements MailService {
                 send(toEmail, "CareerForge AI Admin Login OTP", html);
         }
 
-        @Async // ✅ tumhare AsyncConfig ka default executor (mail-async-*) use hoga
-        @Override
-        public void sendAdminLoginOtpAsync(String name, String email, String otp, long expiryMinutes) {
-                try {
-                        sendAdminLoginOtp(name, email, otp, expiryMinutes); // existing synchronous method,
-                                                                            // jaise-tha-waisa
-                } catch (Exception e) {
-                        log.error("Failed to send admin OTP email to {}", email, e);
-                }
-        }
-
-        // ── PAYMENT SUCCESS ──────────────────────────────────────────────
+        // PAYMENT SUCCESS ──────────────────────────────────────────────
         // REDESIGNED: was a single flat paragraph with inline bold amount —
         // now uses a proper "receipt card" (order id / payment id / amount /
         // date as aligned rows) so it reads like an actual invoice email
         // instead of a plain notice.
         @Override
-        @Async
         public void sendPaymentSuccessEmail(String userName, String toEmail, PaymentTransaction txn,
                         byte[] invoicePdf) {
 
@@ -355,7 +304,6 @@ public class MailServiceImpl implements MailService {
         // receipt card + a dedicated refund-timeline callout only when
         // relevant.
         @Override
-        @Async
         public void sendPaymentFailedEmail(String userName, String toEmail, PaymentTransaction txn, String reason,
                         byte[] invoicePdf, int refundSlaDays) {
 
@@ -393,7 +341,6 @@ public class MailServiceImpl implements MailService {
         }
 
         @Override
-        @Async
         public void sendAdminMessage(String userName, String toEmail, String subject, String message) {
                 String safeName = escapeHtml(userName == null ? "there" : userName);
                 String safeMessage = escapeHtml(message).replace("\n", "<br>");

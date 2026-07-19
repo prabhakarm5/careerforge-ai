@@ -28,6 +28,10 @@ public class InterviewSession {
     @Column(name = "resume_project_id")
     private String resumeProjectId;
 
+    // Lightweight interview uploads keep only bounded extracted text, not the original file.
+    @Column(name = "resume_context", columnDefinition = "TEXT")
+    private String resumeContext;
+
     @Column(nullable = false, length = 140)
     private String role;
 

@@ -177,7 +177,7 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 // background me bheji jaayegi. OTP already Redis me save ho chuka
                 // hai is point tak, isliye response turant client ko chala jaayega
                 // — email thodi der baad silently deliver hogi.
-                mailService.sendAdminLoginOtpAsync(
+                mailService.sendAdminLoginOtp(
                                 user.getName(),
                                 user.getEmail(),
                                 otp,
@@ -340,7 +340,7 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 redisAdminOtpService.saveResendCooldown(email);
 
                 // ✅ FIX — same reason as sendAdminLoginOtp() — async email
-                mailService.sendAdminLoginOtpAsync(
+                mailService.sendAdminLoginOtp(
                                 user.getName(),
                                 user.getEmail(),
                                 otp,

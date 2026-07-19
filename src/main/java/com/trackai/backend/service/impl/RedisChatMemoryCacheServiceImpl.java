@@ -46,8 +46,17 @@ public class RedisChatMemoryCacheServiceImpl implements RedisChatMemoryCacheServ
 
         try {
             String key = MEMORY_PREFIX + conversationId;
-            String json = objectMapper.writeValueAsString(message);
 
+            // Never turn an expired cache into a misleading one-message history.
+            // The chat message is already durable in PostgreSQL. Leaving this key
+            // absent makes buildConversationMemory load the complete recent history
+            // from DB and hydrate Redis before the model is called.
+            if (!Boolean.TRUE.equals(redisTemplate.hasKey(key))) {
+                log.debug("Chat memory cache is cold; DB hydration required before append: {}", key);
+                return;
+            }
+
+            String json = objectMapper.writeValueAsString(message);
             redisTemplate.opsForList().rightPush(key, json);
 
             // List ko hamesha last MAX_MEMORY tak trim rakho â€”

@@ -127,6 +127,21 @@ flowchart LR
   Persist --> Wallet[Charge configured feature cost]
 ```
 
+### Durable memory recovery
+
+```mermaid
+flowchart LR
+  Save[Persist message] --> PG[(PostgreSQL)]
+  PG --> Exists{Redis conversation exists?}
+  Exists -->|yes| Append[Append and refresh TTL]
+  Exists -->|no| Skip[Do not create partial cache]
+  Skip --> Next[Next memory read]
+  Next --> Hydrate[Load bounded PostgreSQL history]
+  Hydrate --> Redis[(Rebuild Redis memory)]
+```
+
+PostgreSQL is the durable source of truth. A Redis expiry or restart cannot reduce an old conversation to only the newest message: cold appends leave the key absent, then the memory builder hydrates bounded history from the database before the next model call.
+
 ### Resume AI
 
 - Extracts PDF/DOCX text with file-size and content checks.
@@ -140,6 +155,10 @@ flowchart LR
 - Supports job interviews, campus placement, college admission, career changes, and general practice.
 - Works for technical and non-technical professions.
 - Accepts an existing analyzed resume or a newly uploaded resume.
+- Accepts PDF, PNG, JPG, and WebP job descriptions through `POST /api/interviews/context/extract`.
+- Text PDFs use local parsing without an AI charge; scanned documents use the configured Gemini vision model.
+- Context extraction is signature-validated, rate-limited, bounded to 20,000 characters, wallet-charged from YAML/environment configuration, and refunded on provider failure.
+- `InterviewContextExtractionService` and `InterviewContextExtractionServiceImpl` keep the service contract separate from implementation.
 - Live rooms use a short-lived Gemini token; audio/video stream directly between browser and Gemini.
 - The backend sends only bounded role, company, job description, preference, and verified resume context.
 - Written answers are scored using relevance, correctness, evidence, structure, communication, and role fit.
@@ -221,10 +240,25 @@ OPENROUTER_API_KEY=
 RAZORPAY_KEY_ID=
 RAZORPAY_KEY_SECRET=
 RAZORPAY_WEBHOOK_SECRET=
+TOKEN_COST_INTERVIEW_CONTEXT=5
 ```
 
 Never paste real values into README files, frontend variables, logs, screenshots, or issue reports. If a key was exposed in chat or a commit, revoke and rotate it immediately.
 
+## CI/CD
+
+`.github/workflows/docker.yml` deploys the backend on pushes to `main`:
+
+```mermaid
+flowchart LR
+  Push[Push to main] --> Build[Build Docker image]
+  Build --> Tags[Tag commit SHA and latest]
+  Tags --> Hub[Push to Docker Hub]
+  Hub --> Dockerrun[Generate Dockerrun.aws.json]
+  Dockerrun --> EB[Deploy Elastic Beanstalk ap-south-1]
+```
+
+Docker Hub and AWS credentials are supplied through GitHub Actions secrets. Application keys remain deployment environment variables and are not copied into the image, README, screenshots, or logs.
 ## Run And Verify
 
 ```powershell

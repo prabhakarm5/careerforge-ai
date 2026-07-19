@@ -67,7 +67,7 @@ public class InterviewLiveTokenServiceImpl implements InterviewLiveTokenService 
     public LiveInterviewTokenResponse create(LiveInterviewTokenRequest request) {
         validateConfiguration();
         String userId = currentUserId();
-        String resumeContext = loadResumeContext(request.getResumeProjectId(), userId);
+        String resumeContext = loadResumeContext(request.getResumeProjectId(), request.getResumeContext(), userId);
         if (!rateLimitService.allowRequest("interview-live-token:" + userId, 4, 4, 1).isAllowed()) {
             throw new InterviewException(HttpStatus.TOO_MANY_REQUESTS,
                     "Please wait before starting another live interview.");
@@ -237,8 +237,11 @@ public class InterviewLiveTokenServiceImpl implements InterviewLiveTokenService 
                 fallback(resumeContext, "No resume selected."));
     }
 
-    private String loadResumeContext(String resumeProjectId, String userId) {
-        if (resumeProjectId == null || resumeProjectId.isBlank()) return "";
+    private String loadResumeContext(String resumeProjectId, String uploadedContext, String userId) {
+        if (resumeProjectId == null || resumeProjectId.isBlank()) {
+            String source = uploadedContext == null ? "" : uploadedContext.trim();
+            return source.length() <= 12_000 ? source : source.substring(0, 12_000);
+        }
         ResumeProject resume = resumeRepository.findByIdAndUserId(resumeProjectId.trim(), userId)
                 .orElseThrow(() -> new InterviewException(HttpStatus.NOT_FOUND,
                         "Selected resume was not found."));

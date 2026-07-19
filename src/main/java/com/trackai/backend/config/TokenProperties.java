@@ -35,6 +35,8 @@ public class TokenProperties {
 
     private Long interviewLive;
 
+    private Long interviewContext;
+
     private Long website;
 
     private Long pdf;

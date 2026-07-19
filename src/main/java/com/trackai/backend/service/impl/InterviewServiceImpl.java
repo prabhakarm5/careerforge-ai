@@ -47,18 +47,20 @@ public class InterviewServiceImpl implements InterviewService {
         User user = userService.getCurrentUser();
         enforceRateLimit(user.getId());
         ResumeProject resume = optionalResume(request.getResumeProjectId(), user.getId());
+        String resumeContext = resumeContext(resume, request.getResumeContext());
         String model = resolveModel(request.getModel(), resume == null ? null : resume.getModelId());
         long cost = Math.max(0L, value(tokenProperties.getInterviewStart(), 10L));
         consume(user.getId(), cost, "Interview practice start");
 
         try {
             JsonNode generated = geminiClient.generateInterviewQuestion(
-                    resumeContext(resume), normalize(request.getJobDescription()), request.getRole().trim(),
+                    resumeContext, normalize(request.getJobDescription()), request.getRole().trim(),
                     normalize(request.getCompany()), request.getType().name(), request.getDifficulty().name(),
                     "", 1, model);
             InterviewSession session = InterviewSession.builder()
                     .userId(user.getId())
                     .resumeProjectId(resume == null ? null : resume.getId())
+                    .resumeContext(resumeContext)
                     .role(request.getRole().trim())
                     .company(normalize(request.getCompany()))
                     .jobDescription(normalize(request.getJobDescription()))
@@ -88,6 +90,7 @@ public class InterviewServiceImpl implements InterviewService {
             throw new InterviewException(HttpStatus.CONFLICT, "This interview is already complete.");
         }
         ResumeProject resume = optionalResume(session.getResumeProjectId(), user.getId());
+        String resumeContext = resumeContext(resume, session.getResumeContext());
         List<InterviewTurn> previous = new ArrayList<>(
                 turnRepository.findBySessionIdOrderByQuestionNumberAsc(sessionId));
         boolean finalAnswer = session.getCurrentQuestionNumber() >= session.getTotalQuestions();
@@ -96,7 +99,7 @@ public class InterviewServiceImpl implements InterviewService {
 
         try {
             JsonNode evaluation = geminiClient.evaluateInterviewAnswer(
-                    resumeContext(resume), session.getJobDescription(), session.getRole(), session.getCompany(),
+                    resumeContext, session.getJobDescription(), session.getRole(), session.getCompany(),
                     session.getType().name(), session.getDifficulty().name(), transcript(previous),
                     session.getCurrentQuestion(), request.getAnswer().trim(), finalAnswer, session.getModelId());
             int score = calculateStrictScore(evaluation, request.getAnswer());
@@ -198,11 +201,13 @@ public class InterviewServiceImpl implements InterviewService {
                 .orElseThrow(() -> new InterviewException(HttpStatus.NOT_FOUND, "Selected resume was not found."));
     }
 
-    private String resumeContext(ResumeProject resume) {
-        if (resume == null) return "";
-        String value = resume.getGeneratedResumeJson() != null && !resume.getGeneratedResumeJson().isBlank()
-                ? resume.getGeneratedResumeJson() : resume.getResumeText();
-        return limit(value, geminiProperties.getMaxResumeChars());
+    private String resumeContext(ResumeProject resume, String uploadedContext) {
+        if (resume != null) {
+            String value = resume.getGeneratedResumeJson() != null && !resume.getGeneratedResumeJson().isBlank()
+                    ? resume.getGeneratedResumeJson() : resume.getResumeText();
+            return limit(value, geminiProperties.getMaxResumeChars());
+        }
+        return limit(normalize(uploadedContext), Math.min(20_000, geminiProperties.getMaxResumeChars()));
     }
 
     private String transcript(List<InterviewTurn> turns) {

@@ -8,6 +8,8 @@ import lombok.Data;
 public class LiveInterviewTokenRequest {
     @Size(max = 64)
     private String resumeProjectId;
+    @Size(max = 20_000)
+    private String resumeContext;
     @NotBlank @Size(max = 140)
     private String role;
     @Size(max = 140)
