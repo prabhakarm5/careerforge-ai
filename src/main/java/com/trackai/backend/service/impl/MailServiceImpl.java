@@ -4,6 +4,7 @@ import com.trackai.backend.entity.PaymentTransaction;
 import com.trackai.backend.service.MailService;
 import com.trackai.backend.service.MailDeliveryService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.format.DateTimeFormatter;
@@ -12,6 +13,9 @@ import java.time.format.DateTimeFormatter;
 @RequiredArgsConstructor
 public class MailServiceImpl implements MailService {
         private final MailDeliveryService mailDeliveryService;
+
+        @Value("${app.frontend-url}")
+        private String frontendUrl;
 
         // Shared brand tokens used by every prepared email template.
         private static final String BRAND_GRADIENT = "linear-gradient(135deg,#7c3aed,#4f46e5)";
@@ -252,6 +256,7 @@ public class MailServiceImpl implements MailService {
                 String body = paragraph("Hello <b style=\"color:#e2e8f0;\">" + userName + "</b>,")
                                 + paragraph("An admin login was requested for your CareerForge AI account. Use the code below to continue:")
                                 + otpBlock(otp)
+                                + secureAdminEntryLink()
                                 + expiryNote(expiryMinutes);
 
                 String html = wrapShell(
@@ -282,6 +287,7 @@ public class MailServiceImpl implements MailService {
                                 + paragraph("Your payment was successful and your wallet has been credited. Here's your receipt:")
                                 + receiptCard(
                                                 receiptRow("Amount paid", amountFormatted, true),
+                                                receiptRow("Transaction ID", txn.getId(), false),
                                                 receiptRow("Order ID", txn.getOrderId(), false),
                                                 receiptRow("Payment ID",
                                                                 txn.getPaymentId() != null ? txn.getPaymentId() : "—",
@@ -324,6 +330,7 @@ public class MailServiceImpl implements MailService {
                                 + paragraph("Unfortunately, your payment could not be completed. Here are the details:")
                                 + receiptCard(
                                                 receiptRow("Amount", amountFormatted, true),
+                                                receiptRow("Transaction ID", txn.getId(), false),
                                                 receiptRow("Order ID", txn.getOrderId(), false),
                                                 receiptRow("Date", dateFormatted, false),
                                                 receiptRow("Reason",
@@ -351,6 +358,14 @@ public class MailServiceImpl implements MailService {
                                 "This message was sent by the CareerForge AI support team.", BRAND_GRADIENT));
         }
 
+        // The OTP remains in the email body and is intentionally never encoded in a URL.
+        private String secureAdminEntryLink() {
+                String base = frontendUrl == null ? "" : frontendUrl.replaceAll("/+$", "");
+                if (base.isBlank()) return "";
+                return "<p style=\"margin:0 0 18px;text-align:center;\"><a href=\"" + base
+                                + "/admin/login\" style=\"display:inline-block;padding:11px 16px;border-radius:8px;background:"
+                                + BRAND_GRADIENT + ";color:#ffffff;text-decoration:none;font-size:13px;font-weight:700;\">Open secure admin verification</a></p>";
+        }
         private String escapeHtml(String value) {
                 if (value == null)
                         return "";

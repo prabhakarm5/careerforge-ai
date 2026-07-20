@@ -14,6 +14,7 @@ import com.trackai.backend.entity.SubscriptionPlan;
 import com.trackai.backend.entity.User;
 import com.trackai.backend.enums.PaymentGateway;
 import com.trackai.backend.enums.PaymentStatus;
+import com.trackai.backend.exception.RateLImitException;
 import com.trackai.backend.repository.PaymentTransactionRepository;
 import com.trackai.backend.repository.SubscriptionPlanRepository;
 import com.trackai.backend.repository.UserRepository;
@@ -75,7 +76,7 @@ public class PaymentServiceImpl implements PaymentService {
 
         // ───────────────────────── CREATE ORDER ─────────────────────────
         @Override
-        
+
         public CreateOrderResponse createOrder(CreateOrderRequest request) {
                 User user = getAuthenticatedUser();
                 RateLimitResponse rateLimitResponse = redisRateLimitService.allowRequest(
@@ -83,11 +84,13 @@ public class PaymentServiceImpl implements PaymentService {
                                 rateLimitProperties.getCreateOrder().getCapacity(),
                                 rateLimitProperties.getCreateOrder().getRefillTokens(),
                                 rateLimitProperties.getCreateOrder().getRefillMinutes());
-                if (!rateLimitResponse.isAllowed()) throw new RuntimeException(rateLimitResponse.getMessage());
+                if (!rateLimitResponse.isAllowed())
+                        throw new RateLImitException(rateLimitResponse.getMessage());
 
                 SubscriptionPlan plan = subscriptionPlanRepository.findById(request.getPlanId())
                                 .orElseThrow(() -> new RuntimeException("Plan not found"));
-                if (Boolean.FALSE.equals(plan.getActive())) throw new RuntimeException("This plan is no longer available");
+                if (Boolean.FALSE.equals(plan.getActive()))
+                        throw new RuntimeException("This plan is no longer available");
 
                 String temporaryReference = "pending:" + UUID.randomUUID();
                 PromoApplication promo = promoCodeService.reserveForOrder(
@@ -131,6 +134,7 @@ public class PaymentServiceImpl implements PaymentService {
                         throw new RuntimeException("Failed to create order: " + exception.getMessage());
                 }
         }
+
         // ───────────────────────── VERIFY PAYMENT (client redirect flow)
         // ─────────────────────────
         @Override
@@ -146,7 +150,7 @@ public class PaymentServiceImpl implements PaymentService {
                                 rateLimitProperties.getVerifyPayment().getRefillMinutes());
 
                 if (!rateLimitResponse.isAllowed()) {
-                        throw new RuntimeException(rateLimitResponse.getMessage());
+                        throw new RateLImitException(rateLimitResponse.getMessage());
                 }
 
                 try {
@@ -159,7 +163,8 @@ public class PaymentServiceImpl implements PaymentService {
 
                         if (!verified) {
                                 paymentSettlementService.markFailed(
-                                                request.getRazorpayOrderId(), "Signature mismatch", "signature_mismatch");
+                                                request.getRazorpayOrderId(), "Signature mismatch",
+                                                "signature_mismatch");
                                 throw new RuntimeException("Invalid payment signature");
                         }
 

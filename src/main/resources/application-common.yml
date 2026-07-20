@@ -18,6 +18,8 @@
 # CUSTOM APP SETTINGS
 # =========================================
 app:
+  promo:
+    cleanup-interval-ms: ${PROMO_CLEANUP_INTERVAL_MS:300000}
 
   # ---------------------------------------
   # FRONTEND URL
