@@ -12,8 +12,6 @@
 server:
   port: ${SERVER_PORT:9092}
   shutdown: graceful
-
-   # ⭐ ADD THIS
   forward-headers-strategy: framework
   compression:
     enabled: true
@@ -23,6 +21,12 @@ server:
       - text/html
       - text/plain
 
+# CloudFront and Elastic Beanstalk use different origins. Cross-site refresh
+# cookies must be explicitly marked None + Secure or browsers omit them.
+app:
+  cookie:
+    same-site: ${COOKIE_SAME_SITE:None}
+    secure: ${COOKIE_SECURE:true}
 spring:
   lifecycle:
     timeout-per-shutdown-phase: 30s

@@ -278,3 +278,8 @@ Full verification:
 ```
 
 Health endpoint: `http://localhost:9092/actuator/health`
+
+
+## Production setup guide
+
+See [docs/production-auth-and-payments.md](docs/production-auth-and-payments.md) for CloudFront/Elastic Beanstalk cookie settings, exact OAuth callbacks, Razorpay webhook configuration, and a production verification checklist.

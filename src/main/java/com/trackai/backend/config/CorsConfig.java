@@ -53,7 +53,9 @@ public class CorsConfig {
                                 "Origin",
                                 "X-Requested-With",
                                 "X-Client-Timezone",
-                                "X-Client-Locale"));
+                                "X-Client-Locale",
+                                // Refresh requests include the double-submit CSRF header.
+                                "X-XSRF-TOKEN"));
 
                 configuration.setExposedHeaders(List.of(
                                 "Authorization"));
