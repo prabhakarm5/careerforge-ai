@@ -37,7 +37,8 @@ jobs:
 
       - name: Create Elastic Beanstalk Bundle
         run: |
-          mkdir deploy
+          mkdir -p deploy/.ebextensions
+
           cat > deploy/Dockerrun.aws.json << EOF
           {
             "AWSEBDockerrunVersion": "1",
@@ -52,8 +53,16 @@ jobs:
             ]
           }
           EOF
+
+          cat > deploy/.ebextensions/launch-template.config << EOF
+          option_settings:
+            aws:autoscaling:launchconfiguration:
+              RootVolumeType: gp3
+              DisableIMDSv1: true
+          EOF
+
           cd deploy
-          zip -r ../careerforge-deploy.zip Dockerrun.aws.json
+          zip -r ../careerforge-deploy.zip Dockerrun.aws.json .ebextensions
 
       - name: Deploy to Elastic Beanstalk
         uses: einaregilsson/beanstalk-deploy@v22
@@ -62,9 +71,7 @@ jobs:
           aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           application_name: careerforge-ai
           environment_name: careerforge-ai-env
-          # A rerun can reuse the same commit; run_number keeps a new deployment unique.
           version_label: careerforge-${{ github.sha }}-${{ github.run_number }}
-          # A retry of the same workflow deploys its already-created EB version.
           use_existing_version_if_available: true
           region: ap-south-1
           deployment_package: careerforge-deploy.zip
