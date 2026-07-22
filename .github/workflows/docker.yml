@@ -84,5 +84,6 @@ jobs:
           environment_name: careerforge-ai-env
           version_label: careerforge-${{ github.sha }}-${{ github.run_number }}
           use_existing_version_if_available: true
+          recovery_wait_time: 120
           region: ap-south-1
           deployment_package: careerforge-deploy.zip
