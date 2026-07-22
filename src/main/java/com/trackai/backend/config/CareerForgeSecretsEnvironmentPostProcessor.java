@@ -9,9 +9,12 @@ import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 public final class CareerForgeSecretsEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
@@ -19,6 +22,9 @@ public final class CareerForgeSecretsEnvironmentPostProcessor implements Environ
     static final String SECRET_ENV_NAME = "CAREERFORGE_PROD_ENV_JSON";
     private static final String PROPERTY_SOURCE_NAME = "careerForgeAwsSecrets";
     private static final Pattern VALID_KEY = Pattern.compile("[A-Z][A-Z0-9_]*");
+    private static final Set<String> OAUTH_REDIRECT_KEYS = Set.of(
+            "GOOGLE_OAUTH2_REDIRECT_URI",
+            "GITHUB_OAUTH2_REDIRECT_URI");
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
@@ -56,7 +62,8 @@ public final class CareerForgeSecretsEnvironmentPostProcessor implements Environ
                 if (!field.getValue().isValueNode()) {
                     throw new IllegalArgumentException("Nested values are not supported for key: " + field.getKey());
                 }
-                secrets.put(field.getKey(), field.getValue().isNull() ? "" : field.getValue().asText());
+                String value = field.getValue().isNull() ? "" : field.getValue().asText();
+                secrets.put(field.getKey(), secureOAuthRedirect(field.getKey(), value));
             }
 
             if (secrets.isEmpty()) {
@@ -68,6 +75,22 @@ public final class CareerForgeSecretsEnvironmentPostProcessor implements Environ
                     "Unable to load CareerForge production environment. Secret values were not logged.",
                     exception);
         }
+    }
+
+    private String secureOAuthRedirect(String key, String value) throws URISyntaxException {
+        if (!OAUTH_REDIRECT_KEYS.contains(key) || value == null || value.isBlank()) {
+            return value;
+        }
+
+        URI uri = new URI(value);
+        String host = uri.getHost();
+        boolean local = "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host);
+        if (!local && "http".equalsIgnoreCase(uri.getScheme())) {
+            return new URI("https", uri.getUserInfo(), host,
+                    uri.getPort() == 80 ? -1 : uri.getPort(),
+                    uri.getPath(), uri.getQuery(), uri.getFragment()).toString();
+        }
+        return value;
     }
 
     @Override
