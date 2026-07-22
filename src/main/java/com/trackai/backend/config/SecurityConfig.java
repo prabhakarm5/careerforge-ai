@@ -3,6 +3,7 @@ package com.trackai.backend.config;
 import com.trackai.backend.security.JwtAccessDeniedHandler;
 import com.trackai.backend.security.JwtAuthenticationEntryPoint;
 import com.trackai.backend.security.JwtFilter;
+import com.trackai.backend.security.HttpsOAuth2AuthorizationRequestResolver;
 import com.trackai.backend.security.OAuth2LoginFailureHandler;
 import com.trackai.backend.security.OAuth2LoginSuccessHandler;
 import com.trackai.backend.security.OAuth2UserInfoService;
@@ -18,6 +19,7 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
@@ -85,7 +87,9 @@ public class SecurityConfig {
         }
 
         @Bean
-        public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        public SecurityFilterChain securityFilterChain(
+                        HttpSecurity http,
+                        ClientRegistrationRepository clientRegistrations) throws Exception {
 
                 http
 
@@ -257,6 +261,9 @@ public class SecurityConfig {
 
                                 // OAuth2 success creates the same JWT cookie session as password login.
                                 .oauth2Login(oauth2 -> oauth2
+                                                .authorizationEndpoint(endpoint -> endpoint
+                                                                .authorizationRequestResolver(
+                                                                                new HttpsOAuth2AuthorizationRequestResolver(clientRegistrations)))
                                                 .userInfoEndpoint(userInfo -> userInfo
                                                                 .userService(oAuth2UserInfoService))
                                                 .successHandler(oAuth2LoginSuccessHandler)
