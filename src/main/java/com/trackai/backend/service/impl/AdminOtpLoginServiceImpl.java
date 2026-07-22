@@ -1,6 +1,7 @@
 package com.trackai.backend.service.impl;
 
 import com.trackai.backend.config.RateLimitProperties;
+import com.trackai.backend.dto.AdminOtpRevealResponse;
 import com.trackai.backend.dto.LoginResponse;
 import com.trackai.backend.dto.RateLimitResponse;
 import com.trackai.backend.entity.User;
@@ -29,6 +30,7 @@ import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
 import java.time.Duration;
+import java.util.Base64;
 
 @Service
 @RequiredArgsConstructor
@@ -75,6 +77,11 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                                 100000 + secureRandom.nextInt(900000));
         }
 
+        private String generateRevealToken() {
+                byte[] bytes = new byte[32];
+                secureRandom.nextBytes(bytes);
+                return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        }
         // Send admin login OTP
         @Override
         public void sendAdminLoginOtp(
@@ -165,6 +172,9 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                                 email,
                                 otp);
 
+                String revealToken = generateRevealToken();
+                redisAdminOtpService.saveRevealToken(email, revealToken);
+
                 // Save resend cooldown
                 redisAdminOtpService.saveResendCooldown(email);
 
@@ -180,7 +190,7 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 mailService.sendAdminLoginOtp(
                                 user.getName(),
                                 user.getEmail(),
-                                otp,
+                                revealToken,
                                 otpExpiryMinutes);
 
                 log.info("Admin login OTP queued for email: {}", email);
@@ -336,6 +346,9 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                                 email,
                                 otp);
 
+                String revealToken = generateRevealToken();
+                redisAdminOtpService.saveRevealToken(email, revealToken);
+
                 // Save resend cooldown
                 redisAdminOtpService.saveResendCooldown(email);
 
@@ -343,9 +356,23 @@ public class AdminOtpLoginServiceImpl implements AdminOtpLoginService {
                 mailService.sendAdminLoginOtp(
                                 user.getName(),
                                 user.getEmail(),
-                                otp,
+                                revealToken,
                                 otpExpiryMinutes);
 
                 log.info("Admin login OTP resend queued for email: {}", email);
         }
-}
+
+        @Override
+        public AdminOtpRevealResponse revealAdminLoginOtp(String token) {
+                String email = redisAdminOtpService.getEmailByRevealToken(token);
+                if (email == null) {
+                        throw new ResourceNotFoundException("Admin OTP link is invalid or expired");
+                }
+
+                String otp = redisAdminOtpService.getOtp(email);
+                long expiresInSeconds = redisAdminOtpService.getOtpTtlSeconds(email);
+                if (otp == null || expiresInSeconds <= 0) {
+                        throw new ResourceNotFoundException("Admin OTP link is invalid or expired");
+                }
+                return new AdminOtpRevealResponse(otp, expiresInSeconds);
+        }}

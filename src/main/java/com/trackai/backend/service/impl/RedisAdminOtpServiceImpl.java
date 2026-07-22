@@ -1,121 +1,95 @@
 package com.trackai.backend.service.impl;
 
 import com.trackai.backend.service.RedisAdminOtpService;
-
 import lombok.RequiredArgsConstructor;
-
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 
 @Service
 @RequiredArgsConstructor
-public class RedisAdminOtpServiceImpl
+public class RedisAdminOtpServiceImpl implements RedisAdminOtpService {
+    private static final String OTP_PREFIX = "admin_login_otp:";
+    private static final String RESEND_PREFIX = "admin_login_resend:";
+    private static final String REVEAL_PREFIX = "admin_login_otp_reveal:";
+    private static final String REVEAL_EMAIL_PREFIX = "admin_login_otp_reveal_email:";
 
-                implements RedisAdminOtpService {
+    private final StringRedisTemplate redisTemplate;
 
-        private final StringRedisTemplate redisTemplate;
+    @Value("${app.otp.expiry-minutes}")
+    private long otpExpiryMinutes;
 
-        // ADMIN OTP EXPIRY
-        @Value("${app.otp.expiry-minutes}")
-        private long otpExpiryMinutes;
+    @Value("${app.otp.resend-wait-minutes}")
+    private long resendWaitMinutes;
 
-        // ADMIN RESEND WAIT
-        @Value("${app.otp.resend-wait-minutes}")
-        private long resendWaitMinutes;
+    @Override
+    public void saveOtp(String email, String otp) {
+        redisTemplate.opsForValue().set(otpKey(email), otp, Duration.ofMinutes(otpExpiryMinutes));
+    }
 
-        private static final String OTP_PREFIX =
+    @Override
+    public String getOtp(String email) {
+        return redisTemplate.opsForValue().get(otpKey(email));
+    }
 
-                        "admin_login_otp:";
+    @Override
+    public void deleteOtp(String email) {
+        String normalizedEmail = normalizeEmail(email);
+        String reverseKey = REVEAL_EMAIL_PREFIX + normalizedEmail;
+        String revealToken = redisTemplate.opsForValue().get(reverseKey);
+        List<String> keys = new ArrayList<>(List.of(OTP_PREFIX + normalizedEmail, reverseKey));
+        if (revealToken != null && !revealToken.isBlank()) keys.add(REVEAL_PREFIX + revealToken);
+        redisTemplate.delete(keys);
+    }
 
-        private static final String RESEND_PREFIX =
+    @Override
+    public void saveResendCooldown(String email) {
+        redisTemplate.opsForValue().set(
+                RESEND_PREFIX + normalizeEmail(email),
+                "LOCKED",
+                Duration.ofMinutes(resendWaitMinutes));
+    }
 
-                        "admin_login_resend:";
+    @Override
+    public boolean hasResendCooldown(String email) {
+        return Boolean.TRUE.equals(redisTemplate.hasKey(RESEND_PREFIX + normalizeEmail(email)));
+    }
 
-        // NORMALIZE EMAIL
-        private String normalizeEmail(
-                        String email) {
+    @Override
+    public void saveRevealToken(String email, String token) {
+        String normalizedEmail = normalizeEmail(email);
+        String reverseKey = REVEAL_EMAIL_PREFIX + normalizedEmail;
+        String oldToken = redisTemplate.opsForValue().get(reverseKey);
+        if (oldToken != null) redisTemplate.delete(REVEAL_PREFIX + oldToken);
 
-                return email
+        Duration ttl = Duration.ofMinutes(otpExpiryMinutes);
+        redisTemplate.opsForValue().set(REVEAL_PREFIX + token, normalizedEmail, ttl);
+        redisTemplate.opsForValue().set(reverseKey, token, ttl);
+    }
 
-                                .trim()
+    @Override
+    public String getEmailByRevealToken(String token) {
+        if (token == null || !token.matches("[A-Za-z0-9_-]{43}")) return null;
+        return redisTemplate.opsForValue().get(REVEAL_PREFIX + token);
+    }
 
-                                .toLowerCase();
-        }
+    @Override
+    public long getOtpTtlSeconds(String email) {
+        Long ttl = redisTemplate.getExpire(otpKey(email), TimeUnit.SECONDS);
+        return ttl == null ? -1 : ttl;
+    }
 
-        // SAVE OTP
-        @Override
-        public void saveOtp(
+    private String otpKey(String email) {
+        return OTP_PREFIX + normalizeEmail(email);
+    }
 
-                        String email,
-
-                        String otp) {
-
-                // NORMALIZE EMAIL
-                email = normalizeEmail(email);
-
-                // SAVE OTP
-                redisTemplate.opsForValue().set(OTP_PREFIX + email, otp, Duration.ofMinutes(otpExpiryMinutes));
-        }
-
-        // GET OTP
-        @Override
-        public String getOtp(
-                        String email) {
-
-                // NORMALIZE EMAIL
-                email = normalizeEmail(email);
-
-                return redisTemplate.opsForValue()
-
-                                .get(OTP_PREFIX + email);
-        }
-
-        // DELETE OTP
-        @Override
-        public void deleteOtp(
-                        String email) {
-
-                // NORMALIZE EMAIL
-                email = normalizeEmail(email);
-
-                redisTemplate.delete(
-                                OTP_PREFIX + email);
-        }
-
-        // SAVE RESEND COOLDOWN
-        @Override
-        public void saveResendCooldown(
-                        String email) {
-
-                // NORMALIZE EMAIL
-                email = normalizeEmail(email);
-
-                redisTemplate.opsForValue()
-
-                                .set(
-
-                                                RESEND_PREFIX + email,
-
-                                                "LOCKED",
-
-                                                Duration.ofMinutes(
-                                                                resendWaitMinutes));
-        }
-
-        // CHECK RESEND COOLDOWN
-        @Override
-        public boolean hasResendCooldown(
-                        String email) {
-
-                // NORMALIZE EMAIL
-                email = normalizeEmail(email);
-
-                return Boolean.TRUE.equals(
-
-                                redisTemplate.hasKey(
-                                                RESEND_PREFIX + email));
-        }
+    private String normalizeEmail(String email) {
+        return email.trim().toLowerCase(Locale.ROOT);
+    }
 }

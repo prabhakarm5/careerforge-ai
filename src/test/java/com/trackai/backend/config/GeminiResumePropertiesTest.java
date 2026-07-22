@@ -34,4 +34,13 @@ class GeminiResumePropertiesTest {
                 .extracting(GeminiResumeProperties.ModelInfo::getId)
                 .containsExactly("environment-default");
     }
-}
+
+    @Test
+    void webResearchModelFallsBackToConfiguredDefault() {
+        GeminiResumeProperties properties = new GeminiResumeProperties();
+        properties.setModel("default-model");
+        assertThat(properties.getWebResearchModel()).isEqualTo("default-model");
+
+        properties.setWebResearchModel("research-model");
+        assertThat(properties.getWebResearchModel()).isEqualTo("research-model");
+    }}

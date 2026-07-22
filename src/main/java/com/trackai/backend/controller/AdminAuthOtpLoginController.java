@@ -10,6 +10,8 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -94,4 +96,13 @@ public class AdminAuthOtpLoginController {
                                                                                 .plusMinutes(otpResendWaitMinutes))
                                                 .build());
         }
-}
+
+        @GetMapping("/admin-login-otp/reveal")
+        public ResponseEntity<AdminOtpRevealResponse> revealAdminLoginOtp(@RequestParam String token) {
+                return ResponseEntity.ok()
+                                .cacheControl(CacheControl.noStore())
+                                .header(HttpHeaders.PRAGMA, "no-cache")
+                                .header("Referrer-Policy", "no-referrer")
+                                .header("X-Robots-Tag", "noindex, nofollow")
+                                .body(adminOtpLoginService.revealAdminLoginOtp(token));
+        }}

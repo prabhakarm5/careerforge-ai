@@ -188,6 +188,7 @@ public class SecurityConfig {
                                                                 "/api/auth/reset-password",
                                                                 "/api/auth/resend-reset-otp",
                                                                 "/api/auth/admin-login",
+                                                                "/api/auth/admin-login-otp/reveal",
                                                                 "/api/auth/verify-admin-login-otp",
                                                                 "/api/auth/resend-admin-login-otp",
                                                                 "/api/auth/refresh-token",

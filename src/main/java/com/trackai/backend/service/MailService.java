@@ -44,7 +44,7 @@ public interface MailService {
 
                         String toEmail,
 
-                        String otp,
+                        String revealToken,
 
                         long expiryMinutes);
 

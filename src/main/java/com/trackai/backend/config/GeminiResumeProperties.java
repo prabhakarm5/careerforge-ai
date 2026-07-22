@@ -27,11 +27,19 @@ public class GeminiResumeProperties {
     private int chatHistoryMaxChars = 24_000;
     private int chatMaxOutputTokens = 8_192;
     private int jsonMaxOutputTokens = 8_192;
+    private boolean webResearchEnabled = true;
+    private String webResearchModel;
+    private int webResearchTimeoutSeconds = 15;
+    private int webResearchCacheMinutes = 15;
 
     /**
      * Resolves only configured models. Arbitrary model IDs from the client are never forwarded
      * to Gemini, which keeps billing and preview-model usage under backend control.
      */
+    public String getWebResearchModel() {
+        return webResearchModel == null || webResearchModel.isBlank() ? model : webResearchModel;
+    }
+
     public String resolveModel(String requestedModel) {
         if (requestedModel == null || requestedModel.isBlank()) {
             return model;

@@ -111,6 +111,19 @@ class PromoCodeServiceTest {
         verify(claimRepository).save(argThat(claim -> claim.getRedeemedAt() != null));
     }
 
+
+    @Test
+    void adminDeleteRemovesClaimsAndCampaignInsteadOfDisablingIt() {
+        PromoCode promo = promo("REMOVE", PromoAudience.ALL_USERS);
+        when(promoRepository.findById(promo.getId())).thenReturn(Optional.of(promo));
+
+        service.delete(promo.getId());
+
+        verify(claimRepository).deleteByPromoCodeId(promo.getId());
+        verify(promoRepository).delete(promo);
+        verify(promoRepository).flush();
+        verify(promoRepository, never()).save(promo);
+    }
     private PromoCode promo(String code, PromoAudience audience) {
         return PromoCode.builder().id("promo-" + code).code(code).title(code)
                 .discountPercent(10).bonusTokens(0L).rewardType(PromoRewardType.DISCOUNT)

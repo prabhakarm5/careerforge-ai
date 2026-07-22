@@ -223,13 +223,11 @@ public class PromoCodeServiceImpl implements PromoCodeService {
         limit("promo-admin-write:" + actorKey(), rateLimits.getPromoAdmin());
         PromoCode promo = repository.findById(id)
                 .orElseThrow(() -> error(HttpStatus.NOT_FOUND, "Promo code not found"));
-        if (claimRepository.countByPromoCodeId(id) > 0) {
-            // Claimed campaigns remain as an audit record, but disappear from user eligibility immediately.
-            promo.setActive(false);
-            repository.save(promo);
-            return;
-        }
-        repository.deleteById(id);
+        // Claims reference promo ids without an entity cascade, so remove them first.
+        // Payment transactions retain their immutable promo-code text for financial audit.
+        claimRepository.deleteByPromoCodeId(id);
+        repository.delete(promo);
+        repository.flush();
     }
 
     private PromoCode apply(PromoCode promo, PromoCodeRequest request, String code) {

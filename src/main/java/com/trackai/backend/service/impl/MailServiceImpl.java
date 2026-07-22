@@ -251,12 +251,11 @@ public class MailServiceImpl implements MailService {
 
         // ── ADMIN LOGIN OTP ──────────────────────────────────────────────────
         @Override
-        public void sendAdminLoginOtp(String userName, String toEmail, String otp, long expiryMinutes) {
+        public void sendAdminLoginOtp(String userName, String toEmail, String revealToken, long expiryMinutes) {
 
                 String body = paragraph("Hello <b style=\"color:#e2e8f0;\">" + userName + "</b>,")
-                                + paragraph("An admin login was requested for your CareerForge AI account. Use the code below to continue:")
-                                + otpBlock(otp)
-                                + secureAdminEntryLink()
+                                + paragraph("An admin login was requested for your CareerForge AI account. Open the secure page below to view your one-time code:")
+                                + secureAdminEntryLink(revealToken)
                                 + expiryNote(expiryMinutes);
 
                 String html = wrapShell(
@@ -358,13 +357,13 @@ public class MailServiceImpl implements MailService {
                                 "This message was sent by the CareerForge AI support team.", BRAND_GRADIENT));
         }
 
-        // The OTP remains in the email body and is intentionally never encoded in a URL.
-        private String secureAdminEntryLink() {
+        // The URL contains only an opaque Redis-backed token; the OTP never enters email or browser history.
+        private String secureAdminEntryLink(String revealToken) {
                 String base = frontendUrl == null ? "" : frontendUrl.replaceAll("/+$", "");
                 if (base.isBlank()) return "";
                 return "<p style=\"margin:0 0 18px;text-align:center;\"><a href=\"" + base
-                                + "/admin/login\" style=\"display:inline-block;padding:11px 16px;border-radius:8px;background:"
-                                + BRAND_GRADIENT + ";color:#ffffff;text-decoration:none;font-size:13px;font-weight:700;\">Open secure admin verification</a></p>";
+                                + "/admin/otp?token=" + revealToken + "\" style=\"display:inline-block;padding:11px 16px;border-radius:8px;background:"
+                                + BRAND_GRADIENT + ";color:#ffffff;text-decoration:none;font-size:13px;font-weight:700;\">View secure login code</a></p>";
         }
         private String escapeHtml(String value) {
                 if (value == null)

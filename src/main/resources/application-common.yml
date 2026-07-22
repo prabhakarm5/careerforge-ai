@@ -587,6 +587,10 @@ gemini:
     chat-history-max-chars: ${GEMINI_RESUME_CHAT_HISTORY_MAX_CHARS:24000}
     chat-max-output-tokens: ${GEMINI_RESUME_CHAT_MAX_OUTPUT_TOKENS:8192}
     json-max-output-tokens: ${GEMINI_RESUME_JSON_MAX_OUTPUT_TOKENS:8192}
+    web-research-enabled: ${GEMINI_WEB_RESEARCH_ENABLED:true}
+    web-research-model: ${GEMINI_WEB_RESEARCH_MODEL:}
+    web-research-timeout-seconds: ${GEMINI_WEB_RESEARCH_TIMEOUT_SECONDS:15}
+    web-research-cache-minutes: ${GEMINI_WEB_RESEARCH_CACHE_MINUTES:15}
 
 # =========================================
 # LIVE JOB DISCOVERY (Adzuna)

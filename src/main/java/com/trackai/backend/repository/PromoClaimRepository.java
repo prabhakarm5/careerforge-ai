@@ -14,6 +14,7 @@ public interface PromoClaimRepository extends JpaRepository<PromoClaim, String> 
     Optional<PromoClaim> findByPromoCodeIdAndUserId(String promoCodeId, String userId);
     List<PromoClaim> findByUserId(String userId);
     long countByPromoCodeId(String promoCodeId);
+    long deleteByPromoCodeId(String promoCodeId);
 
     @Query("select c.promoCodeId as promoCodeId, count(c) as claimCount from PromoClaim c group by c.promoCodeId")
     List<PromoClaimCount> countAllByPromoCode();

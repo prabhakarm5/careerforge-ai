@@ -32,12 +32,11 @@ public class PromoCampaignCleanupServiceImpl implements PromoCampaignCleanupServ
 
         int deleted = 0;
         for (PromoCode promo : candidates) {
-            if (promoClaimRepository.countByPromoCodeId(promo.getId()) == 0) {
-                promoCodeRepository.delete(promo);
-                deleted++;
-            }
+            promoClaimRepository.deleteByPromoCodeId(promo.getId());
+            promoCodeRepository.delete(promo);
+            deleted++;
         }
-        if (deleted > 0) log.info("Removed {} expired or disabled unclaimed promo campaigns", deleted);
+        if (deleted > 0) log.info("Removed {} expired or disabled promo campaigns", deleted);
         return deleted;
     }
 }
