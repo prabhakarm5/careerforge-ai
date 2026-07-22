@@ -36,7 +36,10 @@ jobs:
           docker push $DOCKER_IMAGE:latest
 
       - name: Create Elastic Beanstalk Bundle
+        env:
+          CAREERFORGE_SECRET_ARN: ${{ vars.CAREERFORGE_SECRET_ARN }}
         run: |
+          test -n "$CAREERFORGE_SECRET_ARN" || { echo "CAREERFORGE_SECRET_ARN repository variable is missing"; exit 1; }
           mkdir -p deploy/.ebextensions
 
           cat > deploy/Dockerrun.aws.json << EOF
@@ -59,6 +62,14 @@ jobs:
             aws:autoscaling:launchconfiguration:
               RootVolumeType: gp3
               DisableIMDSv1: true
+          EOF
+
+          cat > deploy/.ebextensions/environment-secrets.config << EOF
+          option_settings:
+            aws:elasticbeanstalk:application:environment:
+              SPRING_PROFILES_ACTIVE: prod
+            aws:elasticbeanstalk:application:environmentsecrets:
+              JWT_SECRET: ${CAREERFORGE_SECRET_ARN}:JWT_SECRET
           EOF
 
           cd deploy
