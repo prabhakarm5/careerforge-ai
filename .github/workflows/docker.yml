@@ -4,21 +4,32 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: careerforge-production
+  cancel-in-progress: false
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  AWS_REGION: ap-south-1
   DOCKER_IMAGE: prabhakar7277/trackai-backend
+  EB_APPLICATION: careerforge-ai
+  EB_ENVIRONMENT: careerforge-ai-env
 
 jobs:
   docker-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
 
     steps:
       - name: Checkout Source Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
@@ -26,14 +37,14 @@ jobs:
       - name: Build Docker Image
         run: |
           docker build \
-            -t $DOCKER_IMAGE:${{ github.sha }} \
-            -t $DOCKER_IMAGE:latest \
+            -t "$DOCKER_IMAGE:${{ github.sha }}" \
+            -t "$DOCKER_IMAGE:latest" \
             .
 
       - name: Push Docker Image
         run: |
-          docker push $DOCKER_IMAGE:${{ github.sha }}
-          docker push $DOCKER_IMAGE:latest
+          docker push "$DOCKER_IMAGE:${{ github.sha }}"
+          docker push "$DOCKER_IMAGE:latest"
 
       - name: Create Elastic Beanstalk Bundle
         env:
@@ -72,18 +83,88 @@ jobs:
               CAREERFORGE_PROD_ENV_JSON: ${CAREERFORGE_SECRET_ARN}
           EOF
 
+          cat > deploy/.ebextensions/health-check.config << EOF
+          option_settings:
+            aws:elasticbeanstalk:application:
+              Application Healthcheck URL: /actuator/health/liveness
+
+          EOF
+
           cd deploy
           zip -r ../careerforge-deploy.zip Dockerrun.aws.json .ebextensions
 
       - name: Deploy to Elastic Beanstalk
-        uses: einaregilsson/beanstalk-deploy@v22
-        with:
-          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          application_name: careerforge-ai
-          environment_name: careerforge-ai-env
-          version_label: careerforge-${{ github.sha }}-${{ github.run_number }}
-          use_existing_version_if_available: true
-          recovery_wait_time: 120
-          region: ap-south-1
-          deployment_package: careerforge-deploy.zip
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+
+          VERSION_LABEL="careerforge-${GITHUB_SHA::12}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          S3_BUCKET="$(aws elasticbeanstalk create-storage-location \
+            --region "$AWS_REGION" \
+            --query S3Bucket \
+            --output text)"
+          S3_KEY="deployments/${VERSION_LABEL}.zip"
+
+          aws s3 cp careerforge-deploy.zip "s3://${S3_BUCKET}/${S3_KEY}" --region "$AWS_REGION"
+          aws elasticbeanstalk create-application-version \
+            --application-name "$EB_APPLICATION" \
+            --version-label "$VERSION_LABEL" \
+            --source-bundle "S3Bucket=${S3_BUCKET},S3Key=${S3_KEY}" \
+            --region "$AWS_REGION"
+          aws elasticbeanstalk update-environment \
+            --environment-name "$EB_ENVIRONMENT" \
+            --version-label "$VERSION_LABEL" \
+            --region "$AWS_REGION" >/dev/null
+
+          echo "Waiting for ${VERSION_LABEL} to become healthy..."
+          for attempt in $(seq 1 80); do
+            read -r STATUS HEALTH CURRENT_VERSION < <(
+              aws elasticbeanstalk describe-environments \
+                --application-name "$EB_APPLICATION" \
+                --environment-names "$EB_ENVIRONMENT" \
+                --region "$AWS_REGION" \
+                --query 'Environments[0].[Status,Health,VersionLabel]' \
+                --output text
+            )
+
+            echo "Attempt ${attempt}/80: status=${STATUS}, health=${HEALTH}, version=${CURRENT_VERSION}"
+            if [[ "$STATUS" == "Ready" && "$HEALTH" == "Green" && "$CURRENT_VERSION" == "$VERSION_LABEL" ]]; then
+              exit 0
+            fi
+            sleep 15
+          done
+
+          echo "Elastic Beanstalk did not become healthy within 20 minutes."
+          exit 1
+
+      - name: Verify Production Health
+        run: |
+          curl --fail --silent --show-error \
+            --retry 12 \
+            --retry-all-errors \
+            --retry-delay 10 \
+            --max-time 10 \
+            "https://dr07bawk90aps.cloudfront.net/actuator/health/liveness?deployment=${{ github.run_id }}"
+
+      - name: Print Elastic Beanstalk Diagnostics
+        if: failure()
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          echo "Recent Elastic Beanstalk events:"
+          aws elasticbeanstalk describe-events \
+            --environment-name "$EB_ENVIRONMENT" \
+            --region "$AWS_REGION" \
+            --max-items 40 \
+            --query 'Events[*].[EventDate,Severity,Message]' \
+            --output table || true
+
+          echo "Instance health:"
+          aws elasticbeanstalk describe-instances-health \
+            --environment-name "$EB_ENVIRONMENT" \
+            --attribute-names All \
+            --region "$AWS_REGION" \
+            --output table || true

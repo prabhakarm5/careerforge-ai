@@ -206,9 +206,12 @@ public class SecurityConfig {
                                                 // Elastic Beanstalk hits this endpoint (unauthenticated)
                                                 // to determine instance health â€” must be public or
                                                 // EB will mark healthy instances as down.
-                                                .requestMatchers("/actuator/health").permitAll()
+                                                .requestMatchers(
+                                                                "/actuator/health",
+                                                                "/actuator/health/**")
+                                                .permitAll()
 
-                                                // API docs â€” harmless to expose publicly, useful for
+                                                // API docs - harmless to expose publicly, useful for
                                                 // frontend/mobile devs integrating against the API.
                                                 // Remove/lock these down if the API is not meant to
                                                 // be publicly discoverable in production.
@@ -255,7 +258,7 @@ public class SecurityConfig {
                                                 // Default-deny: anything not explicitly listed above
                                                 // requires a valid authenticated JWT. This is the
                                                 
-                                                // safety net â€” new endpoints are secure-by-default
+                                                // safety net - new endpoints are secure-by-default
                                                 // unless someone deliberately opens them up.
                                                 .anyRequest().authenticated())
 

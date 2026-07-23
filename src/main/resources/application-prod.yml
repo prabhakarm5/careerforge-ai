@@ -40,6 +40,10 @@ spring:
       maximum-pool-size: ${DB_POOL_MAX_SIZE:10}
       minimum-idle: ${DB_POOL_MIN_IDLE:2}
       connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:10000}
+      # Keep the web process alive during a temporary database outage. Requests
+      # that require the database still fail normally, but AWS can restart or
+      # diagnose the application instead of losing the whole container.
+      initialization-fail-timeout: -1
       idle-timeout: ${DB_IDLE_TIMEOUT_MS:600000}
       max-lifetime: ${DB_MAX_LIFETIME_MS:1800000}
       keepalive-time: ${DB_KEEPALIVE_TIME_MS:300000}
@@ -48,7 +52,9 @@ spring:
   jpa:
     open-in-view: false
     hibernate:
-      ddl-auto: update           # Dev only — auto-updates schema from entities
+      # Production deployments must not mutate the schema during startup.
+      # Schema changes should be applied as explicit migrations.
+      ddl-auto: none
     # FIX: false kar diya — ab console mein Hibernate ki generated SQL
     # print nahi hogi. Isse cache HIT/MISS wale log lines saaf dikhenge,
     # aur agar DB query chali (cache MISS ki wajah se) to woh SQL clutter
@@ -104,12 +110,27 @@ management:
         include: health,info,prometheus
   endpoint:
     health:
-      show-details: always
+      # This endpoint is public for AWS health checks, so never expose dependency
+      # details or connection metadata.
+      show-details: never
+      probes:
+        enabled: true
+      group:
+        liveness:
+          include: livenessState,ping
+        readiness:
+          include: readinessState,ping
   health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+    # External dependency checks can take 15+ seconds and must not make AWS
+    # believe the JVM/container itself is dead.
     redis:
-      enabled: true
+      enabled: false
     db:
-      enabled: true
+      enabled: false
 
 # =========================================
 # NGROK — Local Tunneling (DEV ONLY)
