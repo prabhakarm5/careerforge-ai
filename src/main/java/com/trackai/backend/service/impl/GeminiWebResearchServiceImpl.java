@@ -24,9 +24,24 @@ import java.util.regex.Pattern;
 @Service
 public class GeminiWebResearchServiceImpl implements WebResearchService {
     private static final Pattern URL = Pattern.compile("https?://\\S+", Pattern.CASE_INSENSITIVE);
+
+    // CHANGED: English-only keyword list missed Hindi/Hinglish queries entirely
+    // (e.g. "aaj ka score batao", "search karke dhundo", "taaza khabar kya hai").
+    // Added Hindi/Hinglish equivalents alongside the original English words so
+    // web research triggers regardless of which language the user types in.
     private static final Pattern WEB_INTENT = Pattern.compile(
-            "\\b(search|browse|internet|web|latest|current|today|recent|official|news|source|link|url|website|page)\\b",
+            "\\b("
+                    // ---- original English keywords (unchanged) ----
+                    + "search|browse|internet|web|latest|current|today|recent|official|news|source|link|url|website|page"
+                    // ---- Hindi / Hinglish additions ----
+                    + "|khoj|khojo|dhundo|dhundho|dhoondo|dhoondho|khoji|pata karo|pata kar|check karo|check kar"
+                    + "|google karo|google kar|net pe|net se|internet pe|online dekho|online check"
+                    + "|taaza|taza|abhi ka|abhi ki|aaj ka|aaj ki|aajkal|kal ka|is waqt|is samay|current mein"
+                    + "|khabar|khabren|samachar|jankari|jaankari|update do|latest update|naya update"
+                    + "|surf karo|browse karo|website kholo|link bhejo|link do|source batao|batao search"
+                    + ")\\b",
             Pattern.CASE_INSENSITIVE);
+
     private static final String CACHE_PREFIX = "web_research:v1:";
 
     private final GeminiResumeProperties properties;
@@ -34,8 +49,8 @@ public class GeminiWebResearchServiceImpl implements WebResearchService {
     private final WebClient webClient;
 
     public GeminiWebResearchServiceImpl(GeminiResumeProperties properties,
-                                        StringRedisTemplate redisTemplate,
-                                        WebClient.Builder webClientBuilder) {
+            StringRedisTemplate redisTemplate,
+            WebClient.Builder webClientBuilder) {
         this.properties = properties;
         this.redisTemplate = redisTemplate;
         this.webClient = webClientBuilder.baseUrl(properties.getBaseUrl()).build();
@@ -49,14 +64,17 @@ public class GeminiWebResearchServiceImpl implements WebResearchService {
     @Override
     public String research(String query, boolean force) {
         String normalized = normalize(query);
-        if (!properties.isWebResearchEnabled() || normalized.isBlank()) return "";
+        if (!properties.isWebResearchEnabled() || normalized.isBlank())
+            return "";
         boolean hasUrl = URL.matcher(normalized).find();
-        if (!force && !hasUrl && !WEB_INTENT.matcher(normalized).find()) return "";
+        if (!force && !hasUrl && !WEB_INTENT.matcher(normalized).find())
+            return "";
 
         String cacheKey = CACHE_PREFIX + sha256(normalized.toLowerCase(Locale.ROOT));
         try {
             String cached = redisTemplate.opsForValue().get(cacheKey);
-            if (cached != null) return cached;
+            if (cached != null)
+                return cached;
         } catch (RuntimeException cacheError) {
             log.debug("Web research cache read skipped: {}", cacheError.getClass().getSimpleName());
         }
@@ -64,7 +82,8 @@ public class GeminiWebResearchServiceImpl implements WebResearchService {
         try {
             List<Map<String, Object>> tools = new ArrayList<>();
             tools.add(Map.of("googleSearch", Map.of()));
-            if (hasUrl) tools.add(Map.of("urlContext", Map.of()));
+            if (hasUrl)
+                tools.add(Map.of("urlContext", Map.of()));
 
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("contents", List.of(Map.of("role", "user", "parts", List.of(Map.of("text", prompt(normalized))))));
@@ -111,11 +130,13 @@ public class GeminiWebResearchServiceImpl implements WebResearchService {
 
     private String extract(JsonNode response) {
         JsonNode parts = response == null ? null : response.path("candidates").path(0).path("content").path("parts");
-        if (parts == null || !parts.isArray()) return "";
+        if (parts == null || !parts.isArray())
+            return "";
         StringBuilder value = new StringBuilder();
         parts.forEach(part -> {
             String text = part.path("text").asText("").trim();
-            if (!text.isBlank()) value.append(text).append('\n');
+            if (!text.isBlank())
+                value.append(text).append('\n');
         });
 
         JsonNode chunks = response.path("candidates").path(0).path("groundingMetadata").path("groundingChunks");
@@ -126,10 +147,12 @@ public class GeminiWebResearchServiceImpl implements WebResearchService {
                 String title = chunk.path("web").path("title").asText("Source").trim();
                 if (!uri.isBlank()) {
                     String source = "- [" + title.replace("[", "").replace("]", "") + "](" + uri + ")";
-                    if (!sources.contains(source)) sources.add(source);
+                    if (!sources.contains(source))
+                        sources.add(source);
                 }
             });
-            if (!sources.isEmpty()) value.append("\nSources:\n").append(String.join("\n", sources));
+            if (!sources.isEmpty())
+                value.append("\nSources:\n").append(String.join("\n", sources));
         }
         return value.toString().trim();
     }

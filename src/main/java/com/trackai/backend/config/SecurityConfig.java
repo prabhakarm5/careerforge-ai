@@ -24,7 +24,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
- * Production-grade Spring Security configuration for TrackAI backend.
+ * Production-grade Spring Security configuration for CareerForge-AI backend.
  *
  * Design notes:
  * - Stateless JWT auth (no sessions, no CSRF token needed).
@@ -93,14 +93,14 @@ public class SecurityConfig {
 
                 http
 
-                                // â”€â”€ CSRF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                              
                                 // Disabled: we are a stateless JWT API, not browser-session
                                 // based. CSRF tokens only matter when the browser auto-attaches
                                 // credentials (cookies). Razorpay's webhook POST also has no
                                 // CSRF token, so this must stay disabled for that call to work.
                                 .csrf(AbstractHttpConfigurer::disable)
 
-                                // â”€â”€ CORS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                               
                                 // Delegates to the CorsConfigurationSource bean (CorsConfig
                                 // class) â€” allowed origins/methods are defined there, NOT
                                 // here, so origin changes never require touching this file.
