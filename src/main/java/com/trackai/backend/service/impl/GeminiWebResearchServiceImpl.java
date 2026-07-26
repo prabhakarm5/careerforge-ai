@@ -42,6 +42,17 @@ public class GeminiWebResearchServiceImpl implements WebResearchService {
                     + ")\\b",
             Pattern.CASE_INSENSITIVE);
 
+    private static final Pattern CAPABILITY_QUESTION = Pattern.compile(
+            "\\b(?:can you (?:search|browse|open)|are you able to (?:search|browse|open)"
+                    + "|(?:search|browse) (?:kar|kr) (?:sakte|skte|paoge)"
+                    + "|(?:url|link) (?:open|khol) (?:kar|kr) (?:sakte|skte|paoge))\\b",
+            Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern CONCRETE_RESEARCH_TARGET = Pattern.compile(
+            "\\b(?:latest|today|news|price|weather|score|job|company|profile|repository|repo|docs|documentation"
+                    + "|compare|review|current status|ke baare|bare mein)\\b",
+            Pattern.CASE_INSENSITIVE);
+
     private static final String CACHE_PREFIX = "web_research:v1:";
 
     private final GeminiResumeProperties properties;
@@ -68,6 +79,10 @@ public class GeminiWebResearchServiceImpl implements WebResearchService {
             return "";
         boolean hasUrl = URL.matcher(normalized).find();
         if (!force && !hasUrl && !WEB_INTENT.matcher(normalized).find())
+            return "";
+        if (!force && !hasUrl
+                && CAPABILITY_QUESTION.matcher(normalized).find()
+                && !CONCRETE_RESEARCH_TARGET.matcher(normalized).find())
             return "";
 
         String cacheKey = CACHE_PREFIX + sha256(normalized.toLowerCase(Locale.ROOT));
