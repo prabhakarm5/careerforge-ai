@@ -14,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -203,6 +204,11 @@ public class SecurityConfig {
                                                                 "/api/plans/**")
                                                 .permitAll()
 
+                                                // Anonymous page views are accepted so public SEO and
+                                                // campaign traffic is visible before a user signs in.
+                                                // TelemetryController applies a Redis per-client limit.
+                                                .requestMatchers(HttpMethod.POST, "/api/telemetry/page-view")
+                                                .permitAll()
                                                 // Elastic Beanstalk hits this endpoint (unauthenticated)
                                                 // to determine instance health â€” must be public or
                                                 // EB will mark healthy instances as down.
