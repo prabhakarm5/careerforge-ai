@@ -22,7 +22,7 @@ env:
 jobs:
   docker-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 55
 
     steps:
       - name: Checkout Source Code
@@ -100,12 +100,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          INSTANCE_ID="$(aws elasticbeanstalk describe-instances-health \
+          INSTANCE_DETAILS="$(aws elasticbeanstalk describe-instances-health \
             --environment-name "$EB_ENVIRONMENT" \
             --attribute-names All \
             --region "$AWS_REGION" \
-            --query 'InstanceHealthList[0].InstanceId' \
+            --query 'InstanceHealthList[0].[InstanceId,HealthStatus]' \
             --output text 2>/dev/null || true)"
+          read -r INSTANCE_ID INSTANCE_HEALTH <<< "$INSTANCE_DETAILS"
           HEALTH_CAUSES="$(aws elasticbeanstalk describe-instances-health \
             --environment-name "$EB_ENVIRONMENT" \
             --attribute-names All \
@@ -113,39 +114,55 @@ jobs:
             --query 'join(` | `, InstanceHealthList[0].Causes[].Message)' \
             --output text 2>/dev/null || true)"
 
-          if [[ "$HEALTH_CAUSES" == *"No data received from the instance"* && -n "$INSTANCE_ID" && "$INSTANCE_ID" != "None" ]]; then
-            echo "Instance ${INSTANCE_ID} is not reporting health; rebooting it so the EB agent can recover."
-            aws ec2 reboot-instances \
-              --instance-ids "$INSTANCE_ID" \
-              --region "$AWS_REGION"
+          REPLACING_INSTANCE=false
+          if [[ "$INSTANCE_HEALTH" == "No Data" || "$HEALTH_CAUSES" == *"No data received from the instance"* ]]; then
+            if [[ -z "$INSTANCE_ID" || "$INSTANCE_ID" == "None" ]]; then
+              echo "Elastic Beanstalk reports no health data but did not return an instance ID."
+              exit 1
+            fi
+
+            echo "Replacing unresponsive instance ${INSTANCE_ID}; Auto Scaling will launch a fresh instance."
+            aws autoscaling terminate-instance-in-auto-scaling-group \
+              --instance-id "$INSTANCE_ID" \
+              --no-should-decrement-desired-capacity \
+              --region "$AWS_REGION" >/dev/null
+            REPLACING_INSTANCE=true
           fi
 
           RECOVERY_STATUS="Unknown"
-          RECOVERY_CAUSES="$HEALTH_CAUSES"
-          for recovery_attempt in $(seq 1 40); do
+          CURRENT_INSTANCE_ID="$INSTANCE_ID"
+          CURRENT_INSTANCE_HEALTH="$INSTANCE_HEALTH"
+          for recovery_attempt in $(seq 1 64); do
             RECOVERY_STATUS="$(aws elasticbeanstalk describe-environments \
               --environment-names "$EB_ENVIRONMENT" \
               --region "$AWS_REGION" \
               --query 'Environments[0].Status' \
               --output text)"
-            RECOVERY_CAUSES="$(aws elasticbeanstalk describe-instances-health \
+            CURRENT_DETAILS="$(aws elasticbeanstalk describe-instances-health \
               --environment-name "$EB_ENVIRONMENT" \
               --attribute-names All \
               --region "$AWS_REGION" \
-              --query 'join(` | `, InstanceHealthList[0].Causes[].Message)' \
+              --query 'InstanceHealthList[0].[InstanceId,HealthStatus]' \
               --output text 2>/dev/null || true)"
-            echo "Recovery attempt ${recovery_attempt}/40: status=${RECOVERY_STATUS}"
+            read -r CURRENT_INSTANCE_ID CURRENT_INSTANCE_HEALTH <<< "$CURRENT_DETAILS"
+            echo "Recovery attempt ${recovery_attempt}/64: status=${RECOVERY_STATUS}, instance=${CURRENT_INSTANCE_ID:-pending}, health=${CURRENT_INSTANCE_HEALTH:-pending}"
 
-            if [[ "$RECOVERY_STATUS" == "Ready" && "$RECOVERY_CAUSES" != *"No data received from the instance"* ]]; then
+            INSTANCE_READY=true
+            if [[ "$REPLACING_INSTANCE" == "true" && "$CURRENT_INSTANCE_ID" == "$INSTANCE_ID" ]]; then
+              INSTANCE_READY=false
+            fi
+
+            if [[ "$RECOVERY_STATUS" == "Ready" && "$INSTANCE_READY" == "true" && -n "$CURRENT_INSTANCE_ID" && "$CURRENT_INSTANCE_ID" != "None" && "$CURRENT_INSTANCE_HEALTH" != "No Data" ]]; then
               break
             fi
             sleep 15
           done
 
-          if [[ "$RECOVERY_STATUS" != "Ready" || "$RECOVERY_CAUSES" == *"No data received from the instance"* ]]; then
-            echo "Elastic Beanstalk instance did not recover within 10 minutes."
+          if [[ "$RECOVERY_STATUS" != "Ready" || -z "$CURRENT_INSTANCE_ID" || "$CURRENT_INSTANCE_ID" == "None" || "$CURRENT_INSTANCE_HEALTH" == "No Data" ]]; then
+            echo "Elastic Beanstalk instance did not recover within 16 minutes."
             exit 1
           fi
+
 
       - name: Deploy to Elastic Beanstalk
         env:
