@@ -93,6 +93,29 @@ jobs:
           cd deploy
           zip -r ../careerforge-deploy.zip Dockerrun.aws.json .ebextensions
 
+      - name: Recover Unresponsive Elastic Beanstalk App
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+
+          HEALTH_STATUS="$(aws elasticbeanstalk describe-instances-health \
+            --environment-name "$EB_ENVIRONMENT" \
+            --attribute-names HealthStatus \
+            --region "$AWS_REGION" \
+            --query 'InstanceHealthList[0].HealthStatus' \
+            --output text 2>/dev/null || true)"
+
+          if [[ "$HEALTH_STATUS" == "No Data" ]]; then
+            echo "Elastic Beanstalk instance is not reporting health; restarting the app server before deployment."
+            aws elasticbeanstalk restart-app-server \
+              --environment-name "$EB_ENVIRONMENT" \
+              --region "$AWS_REGION"
+            sleep 60
+          else
+            echo "Elastic Beanstalk pre-deploy health status: ${HEALTH_STATUS:-unknown}"
+          fi
       - name: Deploy to Elastic Beanstalk
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -132,6 +155,13 @@ jobs:
             echo "Attempt ${attempt}/80: status=${STATUS}, health=${HEALTH}, version=${CURRENT_VERSION}"
             if [[ "$STATUS" == "Ready" && "$HEALTH" == "Green" && "$CURRENT_VERSION" == "$VERSION_LABEL" ]]; then
               exit 0
+            fi
+
+            # Once EB is Ready on the previous version, the deployment has
+            # already rolled back. Fail immediately instead of waiting 20 min.
+            if [[ "$attempt" -ge 12 && "$STATUS" == "Ready" && "$CURRENT_VERSION" != "$VERSION_LABEL" ]]; then
+              echo "Elastic Beanstalk rolled back to ${CURRENT_VERSION}; target was ${VERSION_LABEL}."
+              exit 1
             fi
             sleep 15
           done

@@ -13,6 +13,13 @@ server:
   port: ${SERVER_PORT:9092}
   shutdown: graceful
   forward-headers-strategy: framework
+  tomcat:
+    threads:
+      max: ${SERVER_MAX_THREADS:50}
+      min-spare: ${SERVER_MIN_SPARE_THREADS:5}
+    accept-count: ${SERVER_ACCEPT_COUNT:50}
+    max-connections: ${SERVER_MAX_CONNECTIONS:200}
+
   compression:
     enabled: true
     min-response-size: 1024
@@ -37,8 +44,8 @@ spring:
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: ${DB_POOL_MAX_SIZE:10}
-      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:5}
+      minimum-idle: ${DB_POOL_MIN_IDLE:1}
       connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:10000}
       # Keep the web process alive during a temporary database outage. Requests
       # that require the database still fail normally, but AWS can restart or
