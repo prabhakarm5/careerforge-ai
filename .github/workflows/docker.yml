@@ -112,7 +112,23 @@ jobs:
             aws elasticbeanstalk restart-app-server \
               --environment-name "$EB_ENVIRONMENT" \
               --region "$AWS_REGION"
-            sleep 60
+            for recovery_attempt in $(seq 1 24); do
+              RECOVERY_STATUS="$(aws elasticbeanstalk describe-environments \
+                --environment-names "$EB_ENVIRONMENT" \
+                --region "$AWS_REGION" \
+                --query 'Environments[0].Status' \
+                --output text)"
+              echo "Recovery attempt ${recovery_attempt}/24: status=${RECOVERY_STATUS}"
+              if [[ "$RECOVERY_STATUS" == "Ready" ]]; then
+                break
+              fi
+              sleep 15
+            done
+
+            if [[ "${RECOVERY_STATUS:-Unknown}" != "Ready" ]]; then
+              echo "Elastic Beanstalk did not finish app-server recovery within 6 minutes."
+              exit 1
+            fi
           else
             echo "Elastic Beanstalk pre-deploy health status: ${HEALTH_STATUS:-unknown}"
           fi
