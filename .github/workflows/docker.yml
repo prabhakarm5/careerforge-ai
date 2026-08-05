@@ -100,38 +100,53 @@ jobs:
         run: |
           set -euo pipefail
 
-          HEALTH_STATUS="$(aws elasticbeanstalk describe-instances-health \
+          INSTANCE_ID="$(aws elasticbeanstalk describe-instances-health \
             --environment-name "$EB_ENVIRONMENT" \
-            --attribute-names HealthStatus \
+            --attribute-names All \
             --region "$AWS_REGION" \
-            --query 'InstanceHealthList[0].HealthStatus' \
+            --query 'InstanceHealthList[0].InstanceId' \
+            --output text 2>/dev/null || true)"
+          HEALTH_CAUSES="$(aws elasticbeanstalk describe-instances-health \
+            --environment-name "$EB_ENVIRONMENT" \
+            --attribute-names All \
+            --region "$AWS_REGION" \
+            --query 'join(` | `, InstanceHealthList[0].Causes[].Message)' \
             --output text 2>/dev/null || true)"
 
-          if [[ "$HEALTH_STATUS" == "No Data" ]]; then
-            echo "Elastic Beanstalk instance is not reporting health; restarting the app server before deployment."
-            aws elasticbeanstalk restart-app-server \
-              --environment-name "$EB_ENVIRONMENT" \
+          if [[ "$HEALTH_CAUSES" == *"No data received from the instance"* && -n "$INSTANCE_ID" && "$INSTANCE_ID" != "None" ]]; then
+            echo "Instance ${INSTANCE_ID} is not reporting health; rebooting it so the EB agent can recover."
+            aws ec2 reboot-instances \
+              --instance-ids "$INSTANCE_ID" \
               --region "$AWS_REGION"
-            for recovery_attempt in $(seq 1 24); do
-              RECOVERY_STATUS="$(aws elasticbeanstalk describe-environments \
-                --environment-names "$EB_ENVIRONMENT" \
-                --region "$AWS_REGION" \
-                --query 'Environments[0].Status' \
-                --output text)"
-              echo "Recovery attempt ${recovery_attempt}/24: status=${RECOVERY_STATUS}"
-              if [[ "$RECOVERY_STATUS" == "Ready" ]]; then
-                break
-              fi
-              sleep 15
-            done
-
-            if [[ "${RECOVERY_STATUS:-Unknown}" != "Ready" ]]; then
-              echo "Elastic Beanstalk did not finish app-server recovery within 6 minutes."
-              exit 1
-            fi
-          else
-            echo "Elastic Beanstalk pre-deploy health status: ${HEALTH_STATUS:-unknown}"
           fi
+
+          RECOVERY_STATUS="Unknown"
+          RECOVERY_CAUSES="$HEALTH_CAUSES"
+          for recovery_attempt in $(seq 1 40); do
+            RECOVERY_STATUS="$(aws elasticbeanstalk describe-environments \
+              --environment-names "$EB_ENVIRONMENT" \
+              --region "$AWS_REGION" \
+              --query 'Environments[0].Status' \
+              --output text)"
+            RECOVERY_CAUSES="$(aws elasticbeanstalk describe-instances-health \
+              --environment-name "$EB_ENVIRONMENT" \
+              --attribute-names All \
+              --region "$AWS_REGION" \
+              --query 'join(` | `, InstanceHealthList[0].Causes[].Message)' \
+              --output text 2>/dev/null || true)"
+            echo "Recovery attempt ${recovery_attempt}/40: status=${RECOVERY_STATUS}"
+
+            if [[ "$RECOVERY_STATUS" == "Ready" && "$RECOVERY_CAUSES" != *"No data received from the instance"* ]]; then
+              break
+            fi
+            sleep 15
+          done
+
+          if [[ "$RECOVERY_STATUS" != "Ready" || "$RECOVERY_CAUSES" == *"No data received from the instance"* ]]; then
+            echo "Elastic Beanstalk instance did not recover within 10 minutes."
+            exit 1
+          fi
+
       - name: Deploy to Elastic Beanstalk
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
