@@ -1,5 +1,6 @@
 package com.trackai.backend.service.impl;
 
+import com.trackai.backend.config.HuggingFaceImageProperties;
 import com.trackai.backend.exception.ImageDownloadException;
 import com.trackai.backend.service.ImageDownloaderService;
 
@@ -15,6 +16,7 @@ public class ImageDownloaderServiceImpl
         implements ImageDownloaderService {
 
     private final WebClient.Builder webClientBuilder;
+    private final HuggingFaceImageProperties imageProperties;
 
     @Override
     public byte[] downloadImage(
@@ -24,8 +26,10 @@ public class ImageDownloaderServiceImpl
 
             return webClientBuilder
 
-                    .build()
+                    .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(
+                            Math.max(1024 * 1024, imageProperties.getMaxDownloadBytes())))
 
+                    .build()
                     .get()
 
                     .uri(imageUrl)

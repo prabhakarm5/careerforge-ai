@@ -7,11 +7,13 @@ import com.trackai.backend.dto.image.ImageModelResponse;
 import com.trackai.backend.service.ImageGenerationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/images")
@@ -43,8 +45,16 @@ public class ImageGenerationController {
     }
 
     @GetMapping("/{id}/download")
-    public ResponseEntity<Map<String, String>> download(@PathVariable String id) {
-        return ResponseEntity.ok(imageGenerationService.download(id));
+    public ResponseEntity<byte[]> download(@PathVariable String id) {
+        ImageGenerationService.ImageDownload download = imageGenerationService.download(id);
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(download.fileName(), java.nio.charset.StandardCharsets.UTF_8)
+                .build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .contentType(MediaType.parseMediaType(download.contentType()))
+                .contentLength(download.bytes().length)
+                .body(download.bytes());
     }
 
     @DeleteMapping("/{id}")

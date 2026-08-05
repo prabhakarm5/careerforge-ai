@@ -17,6 +17,7 @@ import com.trackai.backend.repository.GeneratedImageRepository;
 import com.trackai.backend.service.CloudinaryService;
 import com.trackai.backend.service.ImageDownloaderService;
 import com.trackai.backend.service.ImageGenerationService;
+import com.trackai.backend.service.ImageReferencePreparationService;
 import com.trackai.backend.service.UserService;
 import com.trackai.backend.service.WalletService;
 import jakarta.transaction.Transactional;
@@ -24,9 +25,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayInputStream;
+import java.net.URLConnection;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -40,6 +42,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     private final UserService userService;
     private final ImageDownloaderService imageDownloaderService;
     private final CloudinaryService cloudinaryService;
+    private final ImageReferencePreparationService imageReferencePreparationService;
     private final TokenProperties tokenProperties;
     private final OpenRouterProperties openRouterProperties;
     private final HuggingFaceImageProperties huggingFaceImageProperties;
@@ -48,6 +51,9 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     @Transactional
     public GenerateImageResponse generateImage(GenerateImageRequest request) {
         walletService.checkImageGenerationTokens();
+        if (request.getImage() != null && !request.getImage().isEmpty()) {
+            request.setImage(imageReferencePreparationService.prepare(request.getImage()));
+        }
         User user = userService.getCurrentUser();
 
         AIImageProvider imageProvider = imageProviders.stream()
@@ -166,13 +172,35 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     }
 
     @Override
-    public Map<String, String> download(String imageId) {
+    public ImageDownload download(String imageId) {
         String userId = userService.getCurrentUser().getId();
         GeneratedImage image = ownedImage(imageId, userId);
         String url = image.getStorageUrl() == null || image.getStorageUrl().isBlank()
                 ? image.getImageUrl()
                 : image.getStorageUrl();
-        return Map.of("downloadUrl", url);
+        if (url == null || url.isBlank()) {
+            throw new ImageNotFoundException("The saved image file is unavailable.");
+        }
+        byte[] bytes = imageDownloaderService.downloadImage(url);
+        if (bytes == null || bytes.length == 0) {
+            throw new ImageNotFoundException("The saved image file is empty.");
+        }
+        String contentType = detectContentType(bytes);
+        String extension = extensionFor(contentType);
+        return new ImageDownload(bytes, contentType, "careerforge-image-" + image.getId() + extension);
+    }
+
+    private String detectContentType(byte[] bytes) {
+        try {
+            String type = URLConnection.guessContentTypeFromStream(new ByteArrayInputStream(bytes));
+            return type == null ? "image/png" : type;
+        } catch (java.io.IOException ignored) {
+            return "image/png";
+        }
+    }
+
+    private String extensionFor(String type) {
+        return "image/jpeg".equals(type) ? ".jpg" : "image/webp".equals(type) ? ".webp" : ".png";
     }
 
     private GeneratedImage ownedImage(String imageId, String userId) {

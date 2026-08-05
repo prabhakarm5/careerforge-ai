@@ -21,6 +21,13 @@ app:
   promo:
     cleanup-interval-ms: ${PROMO_CLEANUP_INTERVAL_MS:300000}
 
+  image:
+    reference:
+      max-upload-bytes: ${IMAGE_REFERENCE_MAX_UPLOAD_BYTES:8388608}
+      max-dimension: ${IMAGE_REFERENCE_MAX_DIMENSION:2048}
+      max-pixels: ${IMAGE_REFERENCE_MAX_PIXELS:40000000}
+      pdf-dpi: ${IMAGE_REFERENCE_PDF_DPI:144}
+
   # ---------------------------------------
   # FRONTEND URL
   # Used for:

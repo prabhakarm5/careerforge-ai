@@ -77,6 +77,13 @@
             <artifactId>layout</artifactId>
             <version>8.0.5</version>
         </dependency>
+
+        <!-- PDF reference files are rendered to a bounded image for Image AI. -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.5</version>
+        </dependency>
       
         <!-- APACHE POI - secure DOCX resume text extraction -->
         <dependency>
